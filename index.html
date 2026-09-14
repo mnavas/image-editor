@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>image-editor — Full-resolution photo editing, phone-simple</title>
+  <meta name="description" content="A desktop photo editor with Photoshop-grade tools and phone-app ease of use — erase people, edit only part of a picture, reshape, curves, film looks — that always saves at full original resolution. Free and open source." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --violet:      #7C5CFC;
+      --violet-dark: #5B3EE8;
+      --violet-pale: #F3F0FF;
+      --gray-50:     #FAFAFB;
+      --gray-100:    #F3F3F5;
+      --gray-200:    #E6E5EA;
+      --gray-400:    #A5A3AE;
+      --gray-600:    #56545F;
+      --gray-700:    #413F49;
+      --gray-800:    #2A2833;
+      --gray-900:    #17161E;
+      --white:       #FFFFFF;
+      --radius:      12px;
+    }
+
+    html { scroll-behavior: smooth; }
+    body { font-family: 'Inter', sans-serif; color: var(--gray-800); background: var(--white); line-height: 1.6; }
+
+    /* ── NAV ── */
+    nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.95); backdrop-filter: blur(8px); border-bottom: 1px solid var(--gray-200); }
+    .nav-inner { padding: 0 2rem; height: 60px; display: flex; align-items: center; justify-content: space-between; }
+    .nav-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; flex-shrink: 0; }
+    .nav-brand span { font-size: 1.15rem; font-weight: 700; color: var(--violet); }
+    .nav-links { display: flex; align-items: center; gap: 2rem; }
+    .nav-links a { text-decoration: none; font-size: 0.875rem; font-weight: 500; color: var(--gray-600); transition: color 0.15s; }
+    .nav-links a:hover { color: var(--gray-900); }
+    .nav-hamburger { display: none; background: none; border: none; cursor: pointer; padding: 6px; color: var(--gray-800); flex-direction: column; gap: 5px; align-items: center; justify-content: center; }
+    .nav-hamburger span { display: block; width: 22px; height: 2px; background: currentColor; border-radius: 2px; transition: transform 0.2s, opacity 0.2s; }
+    .nav-hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-hamburger.open span:nth-child(2) { opacity: 0; }
+    .nav-hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-mobile { display: none; flex-direction: column; background: var(--white); border-top: 1px solid var(--gray-200); padding: 1rem 1.5rem 1.25rem; gap: 0; }
+    .nav-mobile.open { display: flex; }
+    .nav-mobile a { text-decoration: none; font-size: 0.95rem; font-weight: 500; color: var(--gray-700); padding: 0.7rem 0; border-bottom: 1px solid var(--gray-100); transition: color 0.15s; }
+    .nav-mobile a:last-of-type { border-bottom: none; }
+    .nav-mobile a:hover { color: var(--violet); }
+    .nav-mobile .btn { margin-top: 0.75rem; justify-content: center; width: 100%; }
+
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 0.5rem 1.25rem; border-radius: 8px; font-size: 0.875rem; font-weight: 600; text-decoration: none; transition: all 0.15s; border: none; cursor: pointer; }
+    .btn-primary { background: var(--violet); color: var(--white); }
+    .btn-primary:hover { background: var(--violet-dark); }
+    .btn-outline { background: transparent; color: var(--gray-800); border: 1.5px solid var(--gray-200); }
+    .btn-outline:hover { border-color: var(--violet); color: var(--violet); }
+
+    /* ── HERO ── */
+    .hero { background: linear-gradient(160deg, var(--violet-pale) 0%, var(--white) 55%); padding: 5rem 2rem 4rem; text-align: center; }
+    .hero-badge { display: inline-flex; align-items: center; gap: 6px; background: var(--violet-pale); border: 1px solid #7C5CFC55; color: var(--violet-dark); font-size: 0.8rem; font-weight: 600; padding: 4px 12px; border-radius: 999px; margin-bottom: 1.5rem; }
+    .hero h1 { font-size: clamp(2rem, 5vw, 3.25rem); font-weight: 800; line-height: 1.15; color: var(--gray-900); max-width: 780px; margin: 0 auto 1.25rem; }
+    .hero h1 .highlight { color: var(--violet); }
+    .hero p { font-size: 1.125rem; color: var(--gray-600); max-width: 600px; margin: 0 auto 2.5rem; }
+    .hero-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+    .hero-actions .btn { padding: 0.75rem 1.75rem; font-size: 1rem; }
+    .hero-meta { margin-top: 2.5rem; font-size: 0.8rem; color: var(--gray-400); display: flex; justify-content: center; gap: 1.5rem; flex-wrap: wrap; }
+
+    /* editor mock */
+    .editor-mock { margin: 3rem auto 0; max-width: 720px; background: #1d1b26; border-radius: var(--radius); box-shadow: 0 24px 70px rgba(40,20,90,0.25); border: 1px solid #2c2a38; overflow: hidden; }
+    .editor-bar { display: flex; align-items: center; gap: 8px; padding: 0.6rem 0.9rem; background: #17161e; border-bottom: 1px solid #2c2a38; }
+    .editor-bar .dot { width: 11px; height: 11px; border-radius: 50%; }
+    .editor-bar .dot.r { background: #ff5f57; } .editor-bar .dot.y { background: #febc2e; } .editor-bar .dot.g { background: #28c840; }
+    .editor-bar .title { margin-left: 8px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: #8b899a; }
+    .editor-body { display: grid; grid-template-columns: 1fr 132px; }
+    .editor-canvas { position: relative; aspect-ratio: 3 / 2; background: linear-gradient(135deg, #f0a5c9 0%, #b6a5f6 45%, #7ad0e0 100%); }
+    .editor-canvas .subject { position: absolute; left: 30%; top: 22%; width: 40%; height: 66%; border-radius: 46% 46% 30% 30%; background: rgba(30,20,50,0.35); }
+    .editor-canvas .selection { position: absolute; left: 26%; top: 16%; width: 48%; height: 76%; border: 2px dashed #fff; border-radius: 46% 46% 32% 32%; box-shadow: 0 0 0 2px rgba(0,0,0,0.35); }
+    .editor-rail { background: #201e2a; border-left: 1px solid #2c2a38; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.6rem; }
+    .editor-rail .row { display: flex; flex-direction: column; gap: 4px; }
+    .editor-rail .lbl { font-size: 0.62rem; color: #8b899a; font-family: 'JetBrains Mono', monospace; }
+    .editor-rail .track { height: 5px; border-radius: 3px; background: #35323f; position: relative; }
+    .editor-rail .track::after { content: ''; position: absolute; top: -3px; height: 11px; width: 11px; border-radius: 50%; background: var(--violet); }
+    .editor-rail .t1::after { left: 62%; } .editor-rail .t2::after { left: 40%; } .editor-rail .t3::after { left: 74%; } .editor-rail .t4::after { left: 30%; }
+    .editor-caption { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: #8b899a; text-align: center; padding: 0.7rem; border-top: 1px solid #2c2a38; }
+
+    /* ── SECTION ── */
+    .section { padding: 5rem 2rem; }
+    .section-inner { max-width: 1100px; margin: 0 auto; }
+    .section-label { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--violet); margin-bottom: 0.75rem; }
+    .section-title { font-size: clamp(1.5rem, 3vw, 2.25rem); font-weight: 800; color: var(--gray-900); line-height: 1.2; margin-bottom: 1rem; }
+    .section-sub { font-size: 1rem; color: var(--gray-600); max-width: 600px; }
+
+    /* ── FEATURES ── */
+    .features { background: var(--gray-50); }
+    .feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; margin-top: 3rem; }
+    .feature-card { background: var(--white); border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 1.75rem; transition: box-shadow 0.2s, border-color 0.2s; }
+    .feature-card:hover { box-shadow: 0 4px 20px rgba(90,60,230,0.08); border-color: var(--violet); }
+    .feature-icon { width: 44px; height: 44px; border-radius: 10px; background: var(--violet-pale); display: flex; align-items: center; justify-content: center; font-size: 1.25rem; margin-bottom: 1rem; }
+    .feature-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .feature-card p { font-size: 0.9rem; color: var(--gray-600); line-height: 1.6; }
+
+    /* ── HOW IT WORKS ── */
+    .how { background: var(--white); }
+    .how-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 2rem; margin-top: 3rem; }
+    .how-step { display: flex; gap: 1.25rem; }
+    .how-num { width: 36px; height: 36px; border-radius: 50%; background: var(--violet); color: var(--white); font-weight: 700; font-size: 0.875rem; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .how-step h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.4rem; }
+    .how-step p { font-size: 0.9rem; color: var(--gray-600); line-height: 1.6; }
+
+    /* ── ENGINE (dark) ── */
+    .engine { background: var(--gray-900); }
+    .engine .section-label { color: var(--violet); }
+    .engine .section-title { color: var(--white); }
+    .engine .section-sub { color: var(--gray-400); }
+    .engine-table { margin-top: 3rem; width: 100%; border-collapse: collapse; background: rgba(255,255,255,0.03); border-radius: var(--radius); overflow: hidden; }
+    .engine-table th, .engine-table td { padding: 0.9rem 1.25rem; text-align: left; font-size: 0.9rem; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .engine-table th { color: var(--gray-400); font-weight: 600; width: 34%; }
+    .engine-table td { color: #E6E5EA; }
+    .engine-table tr:last-child th, .engine-table tr:last-child td { border-bottom: none; }
+    .engine-note { margin-top: 1.5rem; color: var(--gray-400); font-size: 0.85rem; }
+
+    /* ── INSTALL ── */
+    .install { background: var(--gray-50); }
+    .code-block { background: #0D1117; border: 1px solid #30363D; border-radius: var(--radius); padding: 1.5rem 1.75rem; margin-top: 2.5rem; overflow-x: auto; }
+    .code-block pre { font-family: 'JetBrains Mono', monospace; font-size: 0.875rem; line-height: 1.7; color: #E6EDF3; }
+    .code-block .cm { color: #8B949E; }
+
+    /* ── CONTRIBUTE ── */
+    .contribute { background: var(--white); }
+    .contribute-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.25rem; margin-top: 3rem; }
+    .contribute-card { background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 1.5rem; transition: box-shadow 0.2s, border-color 0.2s; }
+    .contribute-card:hover { box-shadow: 0 4px 16px rgba(90,60,230,0.08); border-color: var(--violet); }
+    .contribute-card .icon { font-size: 1.75rem; margin-bottom: 0.75rem; }
+    .contribute-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.4rem; }
+    .contribute-card p { font-size: 0.875rem; color: var(--gray-600); line-height: 1.6; margin-bottom: 1rem; }
+    .contribute-card a { font-size: 0.875rem; font-weight: 600; color: var(--violet); text-decoration: none; }
+    .contribute-card a:hover { text-decoration: underline; }
+
+    /* ── SUPPORT ── */
+    .support { background: var(--gray-50); }
+    .support-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center; margin-top: 3rem; }
+    @media (max-width: 768px) { .support-inner { grid-template-columns: 1fr; } }
+    .support-text h2 { font-size: clamp(1.4rem, 3vw, 2rem); font-weight: 800; line-height: 1.25; margin-bottom: 1rem; }
+    .support-text p { font-size: 0.95rem; color: var(--gray-600); line-height: 1.7; margin-bottom: 1rem; }
+    .donate-card { background: var(--white); border: 1.5px solid var(--gray-200); border-radius: var(--radius); padding: 2rem; }
+    .donate-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 1.25rem; }
+    .donate-options { display: flex; flex-direction: column; gap: 0.75rem; }
+    .donate-btn { display: flex; align-items: center; gap: 12px; padding: 0.875rem 1.25rem; border-radius: 10px; text-decoration: none; font-size: 0.875rem; font-weight: 600; transition: opacity 0.15s; border: none; cursor: pointer; }
+    .donate-btn:hover { opacity: 0.88; }
+    .donate-btn-github { background: #24292F; color: var(--white); }
+    .donate-btn-paypal { background: #003087; color: var(--white); }
+    .donate-btn-icon { font-size: 1.1rem; }
+    .donate-btn-text { display: flex; flex-direction: column; line-height: 1.2; text-align: left; }
+    .donate-btn-text small { font-size: 0.75rem; font-weight: 400; opacity: 0.75; }
+    .deuna-btn { display: flex; align-items: center; gap: 0.75rem; background: #1a1a2e; color: var(--white); border: none; border-radius: 10px; padding: 0.75rem 1rem; cursor: pointer; width: 100%; font-family: 'Inter', sans-serif; font-size: 0.9rem; font-weight: 600; transition: opacity 0.15s; }
+    .deuna-btn:hover { opacity: 0.85; }
+    .deuna-btn-icon { font-size: 1.2rem; flex-shrink: 0; }
+    .deuna-btn-text { display: flex; flex-direction: column; line-height: 1.2; text-align: left; }
+    .deuna-btn-text small { font-size: 0.75rem; font-weight: 400; opacity: 0.75; }
+
+    .modal-overlay { display: none; position: fixed; inset: 0; z-index: 999; background: rgba(0,0,0,0.65); align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal-box { background: var(--white); border-radius: 20px; padding: 2rem; max-width: 340px; width: 90%; text-align: center; box-shadow: 0 24px 60px rgba(0,0,0,0.25); }
+    .modal-box h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.25rem; }
+    .modal-box p { font-size: 0.85rem; color: var(--gray-600); margin-bottom: 1rem; }
+    .modal-box img { width: 100%; max-width: 260px; border-radius: 12px; }
+    .modal-close { display: block; margin: 1rem auto 0; padding: 0.5rem 1.5rem; background: var(--gray-100); border: none; border-radius: 8px; font-family: 'Inter', sans-serif; font-size: 0.875rem; font-weight: 600; cursor: pointer; color: var(--gray-700); }
+    .modal-close:hover { background: var(--gray-200); }
+
+    /* ── OPEN SOURCE ── */
+    .opensource { background: var(--violet); }
+    .opensource .section-title { color: var(--white); }
+    .opensource .section-sub { color: rgba(255,255,255,0.9); max-width: 620px; }
+    .license-badge { display: inline-flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.35); color: var(--white); font-size: 0.8rem; font-weight: 600; padding: 5px 14px; border-radius: 999px; margin-bottom: 1.5rem; }
+    .opensource .btn-white { background: var(--white); color: var(--violet-dark); font-weight: 700; padding: 0.875rem 2rem; font-size: 1rem; border-radius: 8px; text-decoration: none; display: inline-block; margin-top: 2rem; transition: opacity 0.15s; }
+    .opensource .btn-white:hover { opacity: 0.9; }
+
+    /* ── FOOTER ── */
+    footer { background: var(--gray-900); padding: 3rem 2rem; text-align: center; }
+    footer .footer-brand { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 1rem; }
+    footer .footer-brand span { font-size: 1rem; font-weight: 700; color: var(--violet); }
+    footer p { font-size: 0.8rem; color: var(--gray-400); margin-top: 0.5rem; }
+    footer nav { margin-top: 1.5rem; display: flex; gap: 1.5rem; justify-content: center; flex-wrap: wrap; background: none; border: none; position: static; }
+    footer nav a { font-size: 0.8rem; color: var(--gray-400); text-decoration: none; }
+    footer nav a:hover { color: var(--white); }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 768px) {
+      .nav-inner { padding: 0 1.25rem; }
+      .nav-links { display: none; }
+      .nav-hamburger { display: flex; }
+      .hero { padding: 4rem 1.25rem 3rem; }
+      .section { padding: 3.5rem 1.25rem; }
+      .editor-body { grid-template-columns: 1fr; }
+      .editor-rail { flex-direction: row; flex-wrap: wrap; }
+      .editor-rail .row { flex: 1; min-width: 45%; }
+      .engine-table th, .engine-table td { padding: 0.7rem 0.9rem; font-size: 0.8rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <a href="#" class="nav-brand"><span>🎨 image-editor</span></a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#engine">Engine</a>
+      <a href="#install">Install</a>
+      <a href="#support">Support</a>
+      <a href="https://github.com/mnavas/image-editor" target="_blank" class="btn btn-primary">GitHub</a>
+    </div>
+    <button class="nav-hamburger" id="nav-toggle" aria-label="Open menu" onclick="toggleNav()"><span></span><span></span><span></span></button>
+  </div>
+  <div class="nav-mobile" id="nav-mobile">
+    <a href="#features" onclick="closeNav()">Features</a>
+    <a href="#how" onclick="closeNav()">How it works</a>
+    <a href="#engine" onclick="closeNav()">Engine</a>
+    <a href="#install" onclick="closeNav()">Install</a>
+    <a href="#support" onclick="closeNav()">Support</a>
+    <a href="https://github.com/mnavas/image-editor" target="_blank" class="btn btn-primary">GitHub</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge">🎨 Open source · Desktop app</div>
+  <h1>Photoshop-grade edits,<br/><span class="highlight">at full resolution</span></h1>
+  <p>Erase people, edit only part of a picture, reshape, curves and film looks — as easy as a phone app, but non-destructive and saved at your photo's <strong>original resolution</strong>. No downscaling, no re-compression.</p>
+  <div class="hero-actions">
+    <a href="https://github.com/mnavas/image-editor" class="btn btn-primary">⬇ Get it on GitHub</a>
+    <a href="docs/user-guide.md" class="btn btn-outline">Read the docs</a>
+  </div>
+  <div class="hero-meta">
+    <span>🖼 Full-resolution export</span>
+    <span>↩️ Non-destructive</span>
+    <span>🔒 100% local</span>
+    <span>🐍 Python · PyQt6</span>
+  </div>
+
+  <div class="editor-mock" aria-label="image-editor interface preview">
+    <div class="editor-bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="title">image-editor — beach.jpg (6000×4000)</span>
+    </div>
+    <div class="editor-body">
+      <div class="editor-canvas">
+        <div class="subject"></div>
+        <div class="selection"></div>
+      </div>
+      <div class="editor-rail">
+        <div class="row"><span class="lbl">Exposure</span><div class="track t1"></div></div>
+        <div class="row"><span class="lbl">Contrast</span><div class="track t2"></div></div>
+        <div class="row"><span class="lbl">Vibrance</span><div class="track t3"></div></div>
+        <div class="row"><span class="lbl">Feather</span><div class="track t4"></div></div>
+      </div>
+    </div>
+    <div class="editor-caption">Selection only · edit blends into the photo · saved at 6000×4000</div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="section features" id="features">
+  <div class="section-inner">
+    <div class="section-label">Features</div>
+    <h2 class="section-title">Serious tools, without the learning curve</h2>
+    <p class="section-sub">The power lives under a simple, direct-on-image interface. Do a little or a lot.</p>
+
+    <div class="feature-grid">
+
+      <div class="feature-card">
+        <div class="feature-icon">🖼</div>
+        <h3>Full-resolution &amp; non-destructive</h3>
+        <p>Preview is fast, but Save always renders at your photo's native resolution — real JPEG quality or lossless PNG/TIFF. Your edits stack as layers; the original pixels are never thrown away.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🖌</div>
+        <h3>Edit only part of a picture</h3>
+        <p>Brush a region and adjust just that area. A feather control and edge-aware masking blend the change so it never looks cut out.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🩹</div>
+        <h3>Erase anything</h3>
+        <p>Paint over a distraction and it's gone. Small blemishes use fast classical inpainting; larger objects use LaMa AI, which invents a matching background and colour-matches the fill.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🧍</div>
+        <h3>Remove a person in one tap</h3>
+        <p>Brush roughly over someone and SAM segments them precisely, then LaMa fills the gap. It runs on a background thread, so the app never freezes.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🫳</div>
+        <h3>Reshape &amp; slim</h3>
+        <p>A liquify push-brush to reshape a body or object — drag an edge inward to slim. Stored as a smooth warp field, so it stays non-destructive and full-resolution.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">📈</div>
+        <h3>Curves &amp; nine adjustments</h3>
+        <p>Exposure, brightness, contrast, highlights, shadows, saturation, vibrance, temperature, tint — plus a draggable master and per-channel R/G/B curve. All work globally or on a selection.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🎞</div>
+        <h3>30 camera &amp; film looks</h3>
+        <p>Camera profiles — Standard, Vivid, Neutral, Landscape, Portrait, Monochrome and more — alongside 20 Fujifilm-inspired film simulations.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">📎</div>
+        <h3>Seamless paste</h3>
+        <p>Drop an object from another photo into the scene. It's Poisson-blended and colour-matched to its surroundings so the seam disappears.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">💾</div>
+        <h3>Re-openable projects</h3>
+        <p>Save an <code style="font-size:0.8rem;background:var(--gray-100);padding:1px 5px;border-radius:4px;">.iedit</code> project to reopen your whole edit — layers, masks, curves — and keep tweaking later.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="section how" id="how">
+  <div class="section-inner">
+    <div class="section-label">How it works</div>
+    <h2 class="section-title">Open, edit, save — nothing lost</h2>
+    <p class="section-sub">No presets to wrangle, no cloud round-trip. Just your photo at full quality.</p>
+
+    <div class="how-grid">
+      <div class="how-step">
+        <div class="how-num">1</div>
+        <div><h3>Open a photo</h3><p>JPEG, PNG, TIFF, BMP, WEBP. Unicode-safe paths on Linux, macOS, and Windows.</p></div>
+      </div>
+      <div class="how-step">
+        <div class="how-num">2</div>
+        <div><h3>Adjust — all or part</h3><p>Move sliders and curves for the whole image, or brush a selection and edit just that region with a soft, blended border.</p></div>
+      </div>
+      <div class="how-step">
+        <div class="how-num">3</div>
+        <div><h3>Retouch</h3><p>Erase distractions or a whole person, reshape and slim, or paste something in — seamlessly blended.</p></div>
+      </div>
+      <div class="how-step">
+        <div class="how-num">4</div>
+        <div><h3>Save full-res or as a project</h3><p>Export at native resolution, or save an <code>.iedit</code> project to keep editing later.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ENGINE -->
+<section class="section engine" id="engine">
+  <div class="section-inner">
+    <div class="section-label">Under the hood</div>
+    <h2 class="section-title">Everything runs on your machine</h2>
+    <p class="section-sub">A Qt-free editing core (NumPy + OpenCV) drives both the live preview and the full-resolution export from the same code, so what you see is what you save.</p>
+
+    <table class="engine-table">
+      <tr><th>Adjustments</th><td>Exposure · Brightness · Contrast · Highlights · Shadows · Saturation · Vibrance · Temperature · Tint · Curves</td></tr>
+      <tr><th>Looks</th><td>10 camera profiles + 20 film simulations (30 total)</td></tr>
+      <tr><th>Retouch</th><td>Local adjustments · Erase (classical + LaMa AI) · Remove person (SAM) · Reshape/liquify · Seamless paste</td></tr>
+      <tr><th>Output</th><td>JPEG (quality) · PNG · TIFF — always at the original resolution, saved atomically with the source date preserved</td></tr>
+      <tr><th>Runs</th><td>100% local · CPU-only core · optional CPU AI models · no account, no telemetry, no cloud</td></tr>
+    </table>
+
+    <p class="engine-note">The core editor needs no models. The AI features (Erase / Remove person) are an optional install and degrade gracefully when absent — see the install guide.</p>
+  </div>
+</section>
+
+<!-- INSTALL -->
+<section class="section install" id="install">
+  <div class="section-inner">
+    <div class="section-label">Installation</div>
+    <h2 class="section-title">Up and running in minutes</h2>
+    <p class="section-sub">Python 3.11+, Linux / macOS / Windows. No build step — clone and run.</p>
+
+    <div class="code-block">
+      <pre><span class="cm"># Clone and launch (first run sets up the venv + installs deps)</span>
+git clone https://github.com/mnavas/image-editor.git
+cd image-editor
+./launch.sh
+
+<span class="cm"># …or by hand</span>
+python3 -m venv .venv
+source .venv/bin/activate   <span class="cm"># Windows: .venv\Scripts\activate</span>
+pip install -r requirements.txt
+python main.py
+
+<span class="cm"># Optional AI (CPU-only) — erase &amp; remove-person</span>
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+pip install --no-deps simple-lama-inpainting fire segment-anything</pre>
+    </div>
+
+    <p style="margin-top:2rem;color:var(--gray-600);font-size:0.875rem;">
+      For Linux system packages, the optional AI models, desktop launcher, and platform notes see
+      <a href="docs/installation.md" style="color:var(--violet);text-decoration:none;">docs/installation.md</a>.
+    </p>
+  </div>
+</section>
+
+<!-- CONTRIBUTE -->
+<section class="section contribute" id="contribute">
+  <div class="section-inner">
+    <div class="section-label">Contribute</div>
+    <h2 class="section-title">Help make it better</h2>
+    <p class="section-sub">image-editor is open source and welcomes contributions of any size.</p>
+
+    <div class="contribute-grid">
+      <div class="contribute-card">
+        <div class="icon">🐛</div>
+        <h3>Report a bug</h3>
+        <p>Something crash or render wrong? Open an issue with steps to reproduce and your OS / Python version.</p>
+        <a href="https://github.com/mnavas/image-editor/issues" target="_blank">Open an issue →</a>
+      </div>
+      <div class="contribute-card">
+        <div class="icon">💡</div>
+        <h3>Suggest a feature</h3>
+        <p>Want a new tool or look? Open a feature request and describe what you'd use it for.</p>
+        <a href="https://github.com/mnavas/image-editor/issues" target="_blank">Request a feature →</a>
+      </div>
+      <div class="contribute-card">
+        <div class="icon">🔧</div>
+        <h3>Submit a pull request</h3>
+        <p>Fork, branch, and send a PR. Read <a href="docs/architecture.md" style="color:var(--violet);">docs/architecture.md</a> first — it maps the modules and the render pipeline.</p>
+        <a href="https://github.com/mnavas/image-editor/fork" target="_blank">Fork on GitHub →</a>
+      </div>
+      <div class="contribute-card">
+        <div class="icon">📖</div>
+        <h3>Improve the docs</h3>
+        <p>Docs are plain Markdown in the <code style="font-size:0.8rem;background:var(--gray-100);padding:1px 5px;border-radius:4px;">docs/</code> folder — easy to edit and submit.</p>
+        <a href="https://github.com/mnavas/image-editor/tree/main/docs" target="_blank">Browse the docs →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SUPPORT -->
+<section class="section support" id="support">
+  <div class="section-inner">
+    <div class="section-label">Support the project</div>
+    <div class="support-inner">
+      <div class="support-text">
+        <h2>Keep image-editor free and actively maintained</h2>
+        <p>image-editor is built and maintained as a side project. It's free and open source — but development tools, time, and motivation all have a real cost.</p>
+        <p>If it saves you from a subscription or from losing your photos' resolution, consider chipping in. Every contribution helps keep it maintained and improving.</p>
+        <p style="font-size:0.85rem;color:var(--gray-400);">All contributions go directly to the developer. No company, no VC behind this.</p>
+      </div>
+      <div class="donate-card">
+        <h3>Choose how to support</h3>
+        <div class="donate-options">
+
+          <a href="https://github.com/sponsors/mnavas" target="_blank" class="donate-btn donate-btn-github">
+            <span class="donate-btn-icon">♥</span>
+            <span class="donate-btn-text">GitHub Sponsors<small>Monthly or one-time via GitHub</small></span>
+          </a>
+
+          <a href="https://paypal.me/warionv" target="_blank" class="donate-btn donate-btn-paypal">
+            <span class="donate-btn-icon">💳</span>
+            <span class="donate-btn-text">PayPal<small>paypal.me/warionv</small></span>
+          </a>
+
+          <button class="deuna-btn" onclick="document.getElementById('deuna-modal').classList.add('open')">
+            <span class="deuna-btn-icon">📱</span>
+            <span class="deuna-btn-text">De Una · Banco Pichincha<small>Pago con QR — Ecuador</small></span>
+          </button>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- OPEN SOURCE -->
+<section class="section opensource" id="opensource">
+  <div class="section-inner" style="text-align:center;">
+    <div class="license-badge">📄 Open source</div>
+    <h2 class="section-title">Free and open source</h2>
+    <p class="section-sub">image-editor is free to use, fork, and modify. No telemetry, no accounts, no cloud — everything runs on your machine. (Optional AI model weights carry their own licences.)</p>
+    <a href="https://github.com/mnavas/image-editor" class="btn-white">View on GitHub →</a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-brand"><span>🎨 image-editor</span></div>
+  <p>Full-resolution, non-destructive photo editing — phone-simple</p>
+  <nav>
+    <a href="https://github.com/mnavas/image-editor">GitHub</a>
+    <a href="docs/installation.md">Install</a>
+    <a href="docs/user-guide.md">User Guide</a>
+    <a href="docs/architecture.md">Architecture</a>
+    <a href="#contribute">Contribute</a>
+    <a href="#support">Support</a>
+    <a href="https://github.com/mnavas/image-editor/issues">Issues</a>
+  </nav>
+</footer>
+
+<!-- DE UNA QR MODAL -->
+<div class="modal-overlay" id="deuna-modal" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal-box">
+    <h3>De Una · Banco Pichincha</h3>
+    <p>Escanea el QR con tu app bancaria para enviar tu aporte.<br>¡Muchas gracias!</p>
+    <img src="assets/deuna-qr.png" alt="QR De Una — Banco Pichincha" />
+    <button class="modal-close" onclick="document.getElementById('deuna-modal').classList.remove('open')">Cerrar</button>
+  </div>
+</div>
+
+<script>
+function toggleNav() {
+  document.getElementById('nav-toggle').classList.toggle('open');
+  document.getElementById('nav-mobile').classList.toggle('open');
+}
+function closeNav() {
+  document.getElementById('nav-toggle').classList.remove('open');
+  document.getElementById('nav-mobile').classList.remove('open');
+}
+</script>
+
+</body>
+</html>

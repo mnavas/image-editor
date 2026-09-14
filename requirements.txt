@@ -1,0 +1,29 @@
+# Phase 0–5 (no ML) — works everywhere, CPU only
+PyQt6>=6.6
+opencv-contrib-python>=4.9   # contrib = ximgproc guided filter for edge-aware masks
+numpy>=1.24
+Pillow>=10.0
+send2trash>=1.8
+
+# Dev
+pytest>=8.0
+
+# Phase 7 — LaMa "erase a person" (optional). simple-lama-inpainting's own pins are
+# hostile (Pillow<10 from source, numpy<2, and it drags the full CUDA toolkit), so
+# install it deliberately, CPU-only, in TWO steps — do NOT `pip install` it plainly:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#   pip install --no-deps simple-lama-inpainting fire
+# --no-deps keeps our numpy 2.x / Pillow / opencv-contrib intact.
+
+# Phase 6 — SAM tap/box-select (optional). Reuses the CPU torch installed above.
+#   pip install --no-deps segment-anything
+# Then the ViT-B checkpoint (~358 MB) is auto-downloaded on first use to
+# ~/.cache/image-editor/, or fetch it manually:
+#   curl -L -o ~/.cache/image-editor/sam_vit_b_01ec64.pth \
+#     https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth
+# CPU timing: ~8 s first select (model load + encode), ~0.1 s after (embedding cached).
+
+# Other optional ML (not yet wired; see docs/analysis.md §8)
+# onnxruntime>=1.17          # alt runtime for SAM / U^2-Net
+# rembg>=2.0                 # one-click background / subject cutout
+# scikit-image>=0.22         # histogram matching for colour match
