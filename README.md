@@ -16,9 +16,12 @@ at native resolution with real quality control.
 
 - Open / zoom / pan; **Save As at full resolution** (JPEG quality / PNG control).
 - Adjustments (whole image **or** brushed selection): exposure, brightness,
-  contrast, highlights, shadows, saturation, vibrance, temperature, tint.
+  contrast, highlights, shadows, saturation, vibrance, temperature, tint,
+  **clarity, texture, dehaze, sharpen**.
 - **Tone/colour curves** — master + per-channel R/G/B, draggable points; works
   globally or on a selection (Apply to selection).
+- **Colour grading** — split-tone (tint shadows/highlights), per-hue **HSL**
+  saturation, plus **vignette** and **film grain** finishing.
 - 30 looks: camera profiles (standard, vivid, neutral, faithful, flat, landscape,
   portrait, monochrome) + high/low-contrast presets + 20 Fujifilm-inspired film sims.
 - **Crop** (composes, follows rotation) and **rotate** ⟲ / ⟳.
@@ -63,6 +66,7 @@ python main.py
 
 - **[docs/installation.md](docs/installation.md)** — full setup, including the optional CPU-only AI models.
 - **[docs/user-guide.md](docs/user-guide.md)** — the complete editing workflow.
+- **[docs/pro-guide.md](docs/pro-guide.md)** — a step-by-step recipe for a professional look, with quick presets.
 - **[docs/architecture.md](docs/architecture.md)** — module map, document model, and render pipeline.
 - **[docs/analysis.md](docs/analysis.md)** / **[docs/plan.md](docs/plan.md)** / **[docs/changelog.md](docs/changelog.md)** — research, roadmap, and what's built.
 

@@ -146,6 +146,7 @@ def to_dict(ctl) -> dict:
         "adjust": dict(ctl.adjust),
         "film": ctl.film,
         "curves": ctl.curves,
+        "grade": ctl.grade,
         "layers": [_layer_to_dict(l) for l in doc.layers],
     }
 
@@ -169,4 +170,11 @@ def load(ctl, path) -> bool:
     ctl.adjust = {**ctl.adjust, **data.get("adjust", {})}
     ctl.film = data.get("film", "original")
     ctl.curves = data.get("curves", {"master": None, "r": None, "g": None, "b": None})
+    saved_grade = data.get("grade")
+    if isinstance(saved_grade, dict):
+        # merge onto defaults so older projects without every key still load
+        ctl.grade["vignette"] = saved_grade.get("vignette", 0.0)
+        ctl.grade["grain"] = saved_grade.get("grain", 0.0)
+        ctl.grade["split_tone"].update(saved_grade.get("split_tone", {}))
+        ctl.grade["hsl"].update(saved_grade.get("hsl", {}))
     return True

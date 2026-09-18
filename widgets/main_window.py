@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
         tabs.setFixedWidth(320)
         tabs.addTab(self._adjust_tab(), "Adjust")
         tabs.addTab(self._curves_tab(), "Curves")
+        tabs.addTab(self._color_tab(), "Color")
         tabs.addTab(self._reshape_tab(), "Reshape")
         tabs.addTab(self._paste_tab(), "Paste")
         tabs.addTab(self._layers_tab(), "Layers")
@@ -239,6 +240,49 @@ class MainWindow(QMainWindow):
         btn_reset = QPushButton("Reset curves")
         btn_reset.clicked.connect(self._reset_curves)
         v.addWidget(btn_reset)
+        v.addStretch(1)
+        return self._scroll(rail)
+
+    def _color_tab(self) -> QWidget:
+        rail = QWidget()
+        v = QVBoxLayout(rail)
+        self.grade_widgets = []
+
+        def slider(lo, hi, val, cb):
+            s = QSlider(Qt.Orientation.Horizontal)
+            s.setRange(lo, hi); s.setValue(val)
+            s.valueChanged.connect(cb)
+            v.addWidget(s); self.grade_widgets.append(s)
+            return s
+
+        v.addWidget(self._header("Split-tone (colour grade)"))
+        self.split_sliders = {}
+        v.addWidget(QLabel("Shadows — hue"))
+        self.split_sliders["sh_hue"] = slider(0, 360, 220, lambda x: self._on_split("sh_hue", x))
+        v.addWidget(QLabel("Shadows — amount"))
+        self.split_sliders["sh_amt"] = slider(0, 100, 0, lambda x: self._on_split("sh_amt", x))
+        v.addWidget(QLabel("Highlights — hue"))
+        self.split_sliders["hi_hue"] = slider(0, 360, 45, lambda x: self._on_split("hi_hue", x))
+        v.addWidget(QLabel("Highlights — amount"))
+        self.split_sliders["hi_amt"] = slider(0, 100, 0, lambda x: self._on_split("hi_amt", x))
+
+        v.addWidget(self._header("HSL — saturation by colour"))
+        self.hsl_sliders = {}
+        for band in ("red", "yellow", "green", "cyan", "blue", "magenta"):
+            v.addWidget(QLabel(band.capitalize()))
+            self.hsl_sliders[band] = slider(-100, 100, 0, lambda x, b=band: self._on_hsl(b, x))
+
+        v.addWidget(self._header("Finishing"))
+        v.addWidget(QLabel("Vignette (− lighten · + darken)"))
+        self.fin_sliders = {}
+        self.fin_sliders["vignette"] = slider(-100, 100, 0, lambda x: self._on_finish("vignette", x))
+        v.addWidget(QLabel("Film grain"))
+        self.fin_sliders["grain"] = slider(0, 100, 0, lambda x: self._on_finish("grain", x))
+
+        btn = QPushButton("Reset colour")
+        btn.clicked.connect(self._reset_grade)
+        v.addWidget(btn)
+        self.grade_widgets.append(btn)
         v.addStretch(1)
         return self._scroll(rail)
 
@@ -437,6 +481,7 @@ class MainWindow(QMainWindow):
         self.curve_editor.blockSignals(True)
         self.curve_editor.set_all(self.ctl.curves or {})
         self.curve_editor.blockSignals(False)
+        self._sync_grade_controls()
         self.ctl.set_mode("global")
         self.btn_mode_global.setChecked(True)
         self.btn_mode_sel.setChecked(False)
@@ -507,6 +552,32 @@ class MainWindow(QMainWindow):
 
     def _reset_curves(self):
         self.curve_editor.reset()   # emits changed → routed by mode
+
+    def _on_split(self, key, val):
+        self.ctl.set_split_tone(key, float(val))
+        self._preview_timer.start()
+
+    def _on_hsl(self, band, val):
+        self.ctl.set_hsl(band, float(val))
+        self._preview_timer.start()
+
+    def _on_finish(self, key, val):
+        self.ctl.set_finish(key, float(val))
+        self._preview_timer.start()
+
+    def _reset_grade(self):
+        self.ctl.reset_grade()
+        self._sync_grade_controls()
+        self._render_preview()
+
+    def _sync_grade_controls(self):
+        g = self.ctl.grade
+        for k, s in self.split_sliders.items():
+            s.blockSignals(True); s.setValue(int(g["split_tone"][k])); s.blockSignals(False)
+        for b, s in self.hsl_sliders.items():
+            s.blockSignals(True); s.setValue(int(g["hsl"][b])); s.blockSignals(False)
+        for k, s in self.fin_sliders.items():
+            s.blockSignals(True); s.setValue(int(g[k])); s.blockSignals(False)
 
     def _set_mode(self, mode):
         self.btn_mode_global.setChecked(mode == "global")
@@ -786,6 +857,8 @@ class MainWindow(QMainWindow):
         self.ctl.reset_adjust()
         self.ctl.reset_local()
         self.ctl.set_curves()
+        self.ctl.reset_grade()
+        self._sync_grade_controls()
         self._set_mode("global")
 
     def _set_enabled(self, on):
@@ -793,7 +866,7 @@ class MainWindow(QMainWindow):
                    self.btn_person, self.btn_subject, self.btn_insert, self.chk_show_sel,
                    self.btn_mode_global, self.btn_mode_sel, self.film_box,
                    self.brush_slider, self.curve_channel, self.curve_editor,
-                   self.btn_apply_curve,
+                   self.btn_apply_curve, *self.grade_widgets,
                    self.btn_reshape, self.warp_size, self.warp_strength,
                    self.btn_apply_warp, self.btn_reset_warp,
                    self.layer_list, self.layer_opacity, self.btn_del_layer,

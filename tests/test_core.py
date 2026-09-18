@@ -330,6 +330,57 @@ def test_controller_paste_commit_and_project_roundtrip(tmp_path):
     assert ctl2.render(full=True).shape == (200, 300, 3)
 
 
+def test_pro_ops_run_and_behave():
+    import cv2
+    img = _img(120, 160)
+    for name, args in [("clarity", {"value": 60}), ("texture", {"value": 60}),
+                       ("sharpen", {"value": 60}), ("dehaze", {"value": 50}),
+                       ("vignette", {"value": 60}), ("grain", {"value": 40}),
+                       ("hsl", {"blue": 60}), ("split_tone", {"sh_hue": 220, "sh_amt": 50})]:
+        out = ops.apply_op(img, name, args)
+        assert out.shape == img.shape and out.dtype == np.uint8
+    # vignette darkens the corners relative to the centre
+    flat = np.full((100, 100, 3), 150, np.uint8)
+    vig = ops.apply_op(flat, "vignette", {"value": 80})
+    assert int(vig[0, 0, 0]) < int(vig[50, 50, 0])
+    # sharpen increases local variance on an edge
+    edge = np.zeros((40, 40, 3), np.uint8); edge[:, 20:] = 200
+    sh = ops.apply_op(edge, "sharpen", {"value": 90})
+    assert sh.std() >= edge.std()
+
+
+def test_hsl_targets_one_hue():
+    import cv2
+    # a blue patch; boosting blue saturation should raise its S, red band shouldn't
+    blue = np.zeros((20, 20, 3), np.uint8); blue[:] = (200, 80, 60)  # BGR bluish
+    def sat(x): return cv2.cvtColor(x, cv2.COLOR_BGR2HSV)[:, :, 1].mean()
+    up = ops.apply_op(blue, "hsl", {"blue": 80})
+    noop = ops.apply_op(blue, "hsl", {"red": 80})
+    assert sat(up) > sat(blue) + 2
+    assert abs(sat(noop) - sat(blue)) < 2
+
+
+def test_grade_project_roundtrip(tmp_path):
+    from config import Config
+    from app_controller import AppController
+    from core import project
+    import cv2
+    ctl = AppController(Config())
+    p = str(tmp_path / "s.png"); cv2.imwrite(p, _img(120, 160))
+    assert ctl.open(p)
+    ctl.set_split_tone("sh_amt", 40); ctl.set_split_tone("sh_hue", 210)
+    ctl.set_hsl("blue", 55); ctl.set_finish("vignette", 30); ctl.set_finish("grain", 20)
+    ctl.set_adjust("clarity", 40)          # new maskable slider in the global set
+    graded = ctl.render(full=True)
+    assert graded.shape == (120, 160, 3)
+    proj = str(tmp_path / "g.iedit"); assert ctl.save_project(proj)
+    ctl2 = AppController(Config()); assert project.load(ctl2, proj)
+    assert ctl2.grade["split_tone"]["sh_amt"] == 40
+    assert ctl2.grade["hsl"]["blue"] == 55
+    assert ctl2.grade["vignette"] == 30 and ctl2.grade["grain"] == 20
+    assert ctl2.adjust["clarity"] == 40
+
+
 def test_warp_push_moves_pixels():
     from core import warp
     img = _img(200, 200)

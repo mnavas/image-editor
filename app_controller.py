@@ -23,7 +23,17 @@ from core.mask import BrushStroke, Mask, RasterSource
 
 # the full adjustment set — every one works globally AND on a selection
 GLOBAL_ADJUST_KEYS = ["exposure", "brightness", "contrast", "highlights", "shadows",
-                      "saturation", "vibrance", "temperature", "tint"]
+                      "saturation", "vibrance", "temperature", "tint",
+                      "clarity", "texture", "dehaze", "sharpen"]
+
+
+def _default_grade() -> dict:
+    return {
+        "split_tone": {"sh_hue": 220.0, "sh_amt": 0.0, "hi_hue": 45.0, "hi_amt": 0.0},
+        "hsl": {"red": 0.0, "yellow": 0.0, "green": 0.0, "cyan": 0.0, "blue": 0.0, "magenta": 0.0},
+        "vignette": 0.0,
+        "grain": 0.0,
+    }
 
 
 class AppController:
@@ -37,6 +47,7 @@ class AppController:
         self.adjust = {k: 0.0 for k in GLOBAL_ADJUST_KEYS}
         self.film = "original"
         self.curves = {"master": None, "r": None, "g": None, "b": None}
+        self.grade = _default_grade()   # colour grade + finishing (whole-image)
 
         # local (selection) editing — mirrors the global set + its own curves
         self.mode = "global"                          # "global" | "selection"
@@ -70,6 +81,7 @@ class AppController:
         self.adjust = {k: 0.0 for k in GLOBAL_ADJUST_KEYS}
         self.film = "original"
         self.curves = {"master": None, "r": None, "g": None, "b": None}
+        self.grade = _default_grade()
         self.local = {k: 0.0 for k in GLOBAL_ADJUST_KEYS}
         self.local_curves = {"master": None, "r": None, "g": None, "b": None}
         self.mode = "global"
@@ -115,8 +127,20 @@ class AppController:
         c = self.curves
         if any(c.values()):
             out = ops.apply_op(out, "curves", dict(c))
+        # colour grade
+        g = self.grade
+        if any(g["hsl"].values()):
+            out = ops.apply_op(out, "hsl", dict(g["hsl"]))
+        st = g["split_tone"]
+        if st["sh_amt"] or st["hi_amt"]:
+            out = ops.apply_op(out, "split_tone", dict(st))
         if self.film and self.film != "original":
             out = ops.apply_op(out, "film", {"name": self.film})
+        # finishing
+        if g["vignette"]:
+            out = ops.apply_op(out, "vignette", {"value": g["vignette"]})
+        if g["grain"]:
+            out = ops.apply_op(out, "grain", {"value": g["grain"]})
         return out
 
     def _live_mask(self):
@@ -176,6 +200,20 @@ class AppController:
     def reset_adjust(self):
         self.adjust = {k: 0.0 for k in GLOBAL_ADJUST_KEYS}
         self.film = "original"
+
+    # --- colour grade + finishing (whole image) ----------------------------
+
+    def set_split_tone(self, key: str, value: float):
+        self.grade["split_tone"][key] = value
+
+    def set_hsl(self, band: str, value: float):
+        self.grade["hsl"][band] = value
+
+    def set_finish(self, key: str, value: float):   # "vignette" | "grain"
+        self.grade[key] = value
+
+    def reset_grade(self):
+        self.grade = _default_grade()
 
     def set_curves(self, master=None, r=None, g=None, b=None):
         self.curves = {"master": master, "r": r, "g": g, "b": b}

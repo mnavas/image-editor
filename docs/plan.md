@@ -182,6 +182,54 @@ export (scale=1) — guaranteeing what you see is what you save.
 
 ---
 
+## Phase 9 — Pro-grade capabilities  *(the "professional look")*
+
+From the professional-editing research in [analysis.md §11](analysis.md). Ordered by
+**leverage on a professional result ÷ effort**. Items 9.1–9.6 are pure OpenCV/NumPy
+(no new deps) and slot into the existing layer/mask/curve engine — do these first.
+9.7–9.10 follow the optional-backend pattern proven with LaMa/SAM.
+
+### No new dependencies (highest leverage first)
+
+- **9.1 — Colour grading (HSL + colour balance)** — per-hue **saturation/luminance**
+  targeting, and **shadow/midtone/highlight colour wheels** (split-tone). The biggest
+  "pro colour" lever we lack (Capture One's headline). New `adjust` ops; maskable like
+  the rest. *(2–3 days)*
+- **9.2 — White-balance eyedropper + Kelvin temp** — click a neutral pixel to set WB;
+  temperature in approximate Kelvin. *(1 day)*
+- **9.3 — Clarity / Texture / Dehaze** — midtone local-contrast (unsharp on a large
+  radius), fine-detail texture, and dark-channel-prior haze removal. Maskable. *(2 days)*
+- **9.4 — Sharpening (capture + output)** — unsharp / high-pass sharpen, plus an
+  **output-sharpening** step at export sized for screen vs print. *(1–2 days)*
+- **9.5 — Dodge & burn tool** — a dedicated brush that paints local exposure up/down;
+  mostly reuses the masked-exposure layer path. *(1 day)*
+- **9.6 — Frequency separation (skin)** — split low (tone) / high (texture) frequency so
+  skin can be smoothed while keeping pores; a portrait staple. Maskable. *(1–2 days)*
+- **9.7 — Finishing: vignette + film grain** — creative edge darkening and grain to
+  finish a graded look. *(1 day)*
+- **9.8 — Presets + basic batch** — save an adjustment recipe (an `.iedit` **without**
+  the pixel layers) and apply it to any image or a folder. Consistency = professionalism.
+  Reuses `core/project.py`. *(1–2 days)*
+
+### Optional backends (bigger, higher image-quality tier)
+
+- **9.9 — RAW input** (`rawpy` / libraw) — the biggest *image-quality* gap: true highlight
+  recovery and white balance come from RAW, not JPEG. Also HEIC (`pillow-heif`). *(2–3 days)*
+- **9.10 — Denoise** — classical `cv2.fastNlMeansDenoisingColored` now; an **AI denoise**
+  model later (the DxO DeepPRIME niche) for high-ISO. *(classical 1 day; ML more)*
+- **9.11 — Lens & perspective correction** — distortion / vignetting / chromatic-aberration
+  and keystone / horizon straighten via OpenCV `undistort` + perspective transform;
+  manual sliders first, lens profiles later. *(2–3 days)*
+- **9.12 — AI super-resolution / upscale** — **Real-ESRGAN** via ONNX Runtime (reuses the
+  lazy `core/backends/` pattern) to enlarge for print without softening; optional face
+  recovery. ⚠️ check model licence. *(2–3 days)*
+
+**Suggested order:** 9.2 → 9.4 → 9.3 → 9.1 → 9.5 → 9.8 → 9.6 → 9.7, then the backend tier
+9.9 → 9.10 → 9.12 → 9.11. Until RAW/denoise/upscale land, pair image-editor with a free RAW
+processor (Darktable / RawTherapee) for those steps.
+
+---
+
 ## Cross-cutting concerns
 
 - **Performance:** proxy preview at longest-side ≤ ~2000 px; full-res only on
@@ -204,4 +252,5 @@ export (scale=1) — guaranteeing what you see is what you save.
 | **M2 — classical retouch** | 4–5 | heal small stuff, seamless paste, colour match |
 | **M3 — "erase anyone"** | 6–7 | SAM tap-select + LaMa erase, the headline feature |
 | **M4 — creative/optional** | 8 | SD replace/outpaint, AI looks, RAW/HEIC, batch |
+| **M5 — pro-grade look** | 9 | colour grading/HSL, WB picker, clarity/dehaze, sharpening, dodge & burn, frequency separation, presets/batch, then RAW · denoise · upscale · lens correction |
 </content>

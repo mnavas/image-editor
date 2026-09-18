@@ -5,6 +5,54 @@ See [plan.md](plan.md) for the phase roadmap and [analysis.md](analysis.md) for 
 
 ---
 
+## 2026-09-17 (later) — Docs: pro guide + user guide refresh ✅
+
+- New **`docs/pro-guide.md`** — a step-by-step "professional look" recipe (7 steps),
+  quick preset table (clean/warm portrait/cinematic/landscape/B&W), and common
+  mistakes, all mapped to image-editor's tools.
+- **`docs/user-guide.md`** updated for the new adjustments (clarity/texture/dehaze/
+  sharpen) and the **Color tab** (split-tone, HSL, vignette, grain).
+- Linked the pro guide from the README and the landing page footer.
+
+---
+
+## 2026-09-17 (later) — Phase 9 (no-dep pro tools) ✅
+
+The no-dependency slice of Phase 9 — the levers that give a professional look.
+
+- **New maskable adjustments** (work whole-image AND on a selection): **Clarity**
+  (midtone local contrast), **Texture** (fine detail), **Sharpen** (unsharp), **Dehaze**
+  (simplified dark-channel prior). Added to the Adjust sliders.
+- **New Color tab (whole-image grade):**
+  - **Split-tone** colour grading — tint shadows and highlights toward chosen hues.
+  - **HSL** — saturation by colour band (red/yellow/green/cyan/blue/magenta).
+  - **Finishing** — Vignette and Film grain.
+- All are ordinary `core/ops.py` ops, so they compose in the render pipeline and
+  serialize into `.iedit` (grade saved/restored).
+- Tests: pro ops run + behave (vignette darkens corners, sharpen raises edge
+  variance, HSL targets one hue), and a grade `.iedit` round-trip. 32/32 pass.
+
+Still to do in Phase 9: dodge & burn tool, frequency separation, presets/batch, and
+the backend tier (RAW, AI denoise, super-resolution, lens correction).
+
+---
+
+## 2026-09-17 — Pro-editing research → analysis §11 + plan Phase 9 ✅
+
+Researched what makes photos look professional and which tools deliver it; folded
+the findings into the docs (not yet built — planning only).
+
+- `analysis.md` **§11**: the pro workflow, the reference tools (Lightroom, Capture
+  One, DxO, Darktable, RawTherapee, Photoshop, Topaz, Real-ESRGAN) and what each is
+  for, image-editor's current strengths vs. the pro gaps, with sources.
+- `plan.md` **Phase 9** (+ milestone **M5**): prioritized pro features — colour
+  grading/HSL, WB eyedropper, clarity/texture/dehaze, sharpening (capture + output),
+  dodge & burn, frequency separation, vignette/grain, presets/batch (all no-dep),
+  then RAW, denoise, super-resolution (Real-ESRGAN), and lens/perspective correction
+  as optional backends.
+
+---
+
 ## 2026-09-14 (later) — Docs + landing page ✅
 
 Documentation and a landing page, modelled on image_selector / instax-printing.

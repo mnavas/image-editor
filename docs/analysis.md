@@ -339,6 +339,94 @@ the ML runtime — the part that makes edits genuinely *sophisticated* rather th
 
 ---
 
+## 11. Professional-grade capabilities — research (2026)
+
+> Added after a research pass on *what actually makes photos look professional* and
+> which tools deliver it, to steer image-editor toward pro-quality output. The goal:
+> keep the phone-simple UX while adding the levers that separate an amateur edit from
+> a professional one.
+
+### What the pros actually do (the workflow)
+
+The consistent professional pipeline, across guides, is an **ordered, non-destructive
+workflow** — not random slider-pushing:
+
+1. **Cull** ruthlessly (pick keepers; toss blurry/blinked).
+2. **Base correction on the RAW** — white balance, exposure, highlight/shadow recovery.
+3. **Tone & colour** — contrast/curves, then **colour grading** (HSL + split-tone).
+4. **Local work** — masked adjustments, **dodge & burn** to shape light.
+5. **Retouch** — heal/spot removal; **frequency separation** for skin.
+6. **Denoise** (especially high-ISO) and **lens/perspective correction**.
+7. **Output** — resize + **output sharpening** tuned for screen or print.
+8. **Consistency** — a signature look applied as **presets** across a set; increasingly
+   an **AI assistant** trained on the photographer's style handles the mechanical steps.
+   ([Imagen — edit like a pro](https://imagen-ai.com/valuable-tips/how-to-edit-photos-like-a-professional-editor/),
+   [Filterpixel — repeatable workflow](https://filterpixel.com/blog/how-to-professionally-edit-photos),
+   [Fstoppers — freq. separation / dodge & burn / grading](https://fstoppers.com/education/complete-guide-frequency-separation-dodging-and-burning-and-color-grading-485517))
+
+The "pro look" is mostly: **accurate colour + white balance, deliberate light
+(dodge & burn), clean colour grading, natural skin, low noise, and correct
+sharpening** — applied non-destructively and consistently.
+
+### The reference tools (and what each is *for*)
+
+| Tool | Licence | Known for | Relevance to us |
+|------|---------|-----------|-----------------|
+| **Adobe Lightroom Classic** | paid | the default RAW workflow; GPU RAW; AI masks | the workflow model to emulate |
+| **Capture One** | paid | **best colour tools** & skin rendering, tethering | its colour-grading depth is the bar for our HSL/colour work |
+| **DxO PhotoLab** | paid | **DeepPRIME denoise** + best lens corrections | denoise + lens-correction are its moat — both are gaps for us |
+| **Darktable** | **FOSS** | scene-referred pipeline, 60+ modules, masks | our closest open reference; algorithms we can mirror |
+| **RawTherapee** | **FOSS** | powerful RAW demosaic & detail | reference for RAW processing |
+| **Photoshop** | paid | pixel retouching, frequency separation, dodge & burn | the retouching techniques to implement |
+| **Topaz Photo AI** | paid | denoise / sharpen / **upscale** / face recovery | what "AI enhance" means to users |
+| **Real-ESRGAN / Upscayl** | **FOSS** | AI **super-resolution**, rivals paid upscalers | our open path to upscaling |
+([Best editing software 2026](https://www.findingtheuniverse.com/best-photo-editing-software/),
+[Topaz upscalers](https://www.topazlabs.com/best-image-upscalers),
+[Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN))
+
+### image-editor today vs. the pro gap
+
+**Already have (good foundation):** exposure/brightness/contrast/highlights/shadows,
+saturation/vibrance, temperature/tint, curves (master + RGB), **local masked edits with
+feather + edge-aware borders**, heal (classical + LaMa), remove-person (SAM),
+reshape/liquify, seamless paste, crop/rotate, 30 looks, full-res non-destructive, layers,
+`.iedit` projects. Dodge & burn is *nearly* free already (masked local exposure).
+
+**The gaps that most affect a professional result**, high → lower leverage:
+
+1. **HSL + colour grading** (per-hue sat/lum; shadow/mid/highlight colour balance / split-tone).
+   Capture One's headline strength; the biggest "pro colour" lever we lack. *(OpenCV/NumPy — no model.)*
+2. **White-balance eyedropper** + Kelvin temp; **auto-WB we have, but not click-neutral.** *(easy)*
+3. **Clarity / Texture / Dehaze** (local-contrast midtone punch; dark-channel-prior haze removal). *(OpenCV — no model.)*
+4. **Sharpening** — capture sharpening (unsharp/high-pass) **and output sharpening** sized for
+   screen/print. A pro final step we don't have. *(OpenCV — no model.)*
+5. **Dodge & burn tool** — a dedicated brush (leverages our masked-exposure layers). *(reuse.)*
+6. **Denoise** — classical (`cv2.fastNlMeansDenoisingColored`) now; **AI denoise** later.
+   High-ISO cleanup is a top pro differentiator (DxO DeepPRIME). *(classical easy; ML bigger.)*
+7. **Frequency separation** — smooth skin tone while keeping texture, for portraits.
+   *(low/high-pass split — OpenCV.)*
+8. **Vignette + film grain** — finishing touches for a graded look. *(easy.)*
+9. **Presets** — save an adjustment recipe (an `.iedit` minus the pixels) and apply it to any
+   image / a batch. **Consistency is itself professionalism.** *(reuses our serializer.)*
+10. **RAW input** (`rawpy`/libraw) — the single biggest *image-quality* gap: real highlight
+    recovery and WB come from RAW, not JPEG. *(dependency, no model.)*
+11. **Lens & perspective correction** — distortion/vignetting/chromatic-aberration and
+    keystone/horizon straighten. *(OpenCV `undistort` / perspective; manual sliders feasible.)*
+12. **AI super-resolution / upscale** — enlarge for print without going soft; **Real-ESRGAN**
+    via ONNX Runtime is the open path (reuses our lazy-backend pattern from LaMa/SAM). *(model.)*
+
+### Recommendation
+
+Most of the "professional look" is reachable **with no new dependencies** — items 1–5, 7–9 are
+pure OpenCV/NumPy and slot into the existing layer/mask/curve engine. Items 6, 10–12 (AI denoise,
+RAW, lens profiles, super-resolution) are the heavier, higher-quality tier that follows the same
+optional-backend pattern already proven with LaMa and SAM. Until RAW/denoise/upscale land,
+pairing image-editor with a free RAW processor (**Darktable / RawTherapee**) covers the gap.
+
+See `plan.md` **Phase 9** for the prioritized build.
+
+---
+
 ## Sources
 
 - IOPaint (LaMa / SD inpainting, mask→fill workflow) — https://github.com/Sanster/IOPaint
@@ -353,5 +441,11 @@ the ML runtime — the part that makes edits genuinely *sophisticated* rather th
 - darktable — drawn masks — https://docs.darktable.org/usermanual/development/en/darkroom/masking-and-blending/masks/drawn/
 - darktable — mask refinement (edge-aware feathering) — https://docs.darktable.org/usermanual/development/en/darkroom/masking-and-blending/masks/refinement-controls/
 - Luminosity masking in darktable (PIXLS.US) — https://pixls.us/articles/luminosity-masking-in-darktable/
+- Imagen — how to edit like a professional (2026 workflow) — https://imagen-ai.com/valuable-tips/how-to-edit-photos-like-a-professional-editor/
+- Filterpixel — a precise, repeatable pro workflow — https://filterpixel.com/blog/how-to-professionally-edit-photos
+- Fstoppers — frequency separation, dodge & burn, colour grading — https://fstoppers.com/education/complete-guide-frequency-separation-dodging-and-burning-and-color-grading-485517
+- Best photo editing software 2026 (Lightroom/Capture One/DxO/Darktable) — https://www.findingtheuniverse.com/best-photo-editing-software/
+- Topaz Labs — best image upscalers 2026 — https://www.topazlabs.com/best-image-upscalers
+- Real-ESRGAN (open-source super-resolution) — https://github.com/xinntao/Real-ESRGAN
 </content>
 </invoke>

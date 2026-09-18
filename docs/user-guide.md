@@ -45,8 +45,11 @@ The **Adjust** tab has two modes, toggled at the top:
   that area, blended so it doesn't look edited.
 
 Adjustments: **Exposure, Brightness, Contrast, Highlights, Shadows, Saturation,
-Vibrance, Temperature, Tint**. (Local contrast is applied to luminance only, so a
-boosted region keeps its natural colour.)
+Vibrance, Temperature, Tint, Clarity, Texture, Dehaze, Sharpen**. (Local contrast is
+applied to luminance only, so a boosted region keeps its natural colour.)
+
+- **Clarity** adds midtone punch and dimension; **Texture** brings out fine detail;
+  **Dehaze** cuts atmospheric flatness; **Sharpen** is an unsharp-mask — use it last.
 
 ### Border smoothing
 
@@ -73,6 +76,26 @@ The **Curves** tab is a draggable tone curve — click to add a point, drag to s
 right-click to remove. An S-curve adds contrast; per-channel **R / G / B** shifts
 colour. Curves follow the Adjust tab's Whole image / Selection target, and can be
 **applied to a selection** just like the sliders.
+
+---
+
+## Colour grading (the Color tab)
+
+The **Color** tab is where a photo gets its "look" (whole-image):
+
+- **Split-tone** — tint the shadows and highlights toward chosen hues. A classic
+  cinematic grade is cool shadows (hue ≈ 210°) with warm highlights (≈ 45°) at low
+  amounts. Set each hue, then raise its amount.
+- **HSL** — saturation by colour band (red / yellow / green / cyan / blue / magenta).
+  Deepen a blue sky, calm an over-orange skin tone, or make foliage greener without
+  touching the rest.
+- **Finishing** — **Vignette** (darken the edges to draw the eye to the subject; a
+  negative value lightens) and **Film grain** for a filmic texture.
+
+**Reset colour** returns the whole tab to neutral.
+
+See **[pro-guide.md](pro-guide.md)** for a step-by-step recipe that ties all of this
+together into a professional-looking edit.
 
 ---
 
