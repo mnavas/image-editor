@@ -1,0 +1,302 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan — image-editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--violet:#7C5CFC;--violet-dark:#5B3EE8;--violet-pale:#F3F0FF;--ink:#2A2833;--muted:#56545F;--line:#E6E5EA;--bg:#FFFFFF;--code:#0D1117}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Inter',-apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink);background:var(--bg);line-height:1.7}
+.topbar{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.95);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:.7rem 1.25rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap}
+.topbar .brand{font-weight:700;color:var(--violet);text-decoration:none;margin-right:.5rem}
+.topbar a{font-size:.85rem;color:var(--muted);text-decoration:none}
+.topbar a:hover{color:var(--violet)}
+.topbar a.active{color:var(--violet);font-weight:600}
+main{max-width:820px;margin:0 auto;padding:2.5rem 1.25rem 5rem}
+h1,h2,h3,h4{line-height:1.25;color:#17161E;margin:1.8em 0 .6em}
+h1{font-size:2rem;margin-top:.2em}h2{font-size:1.5rem;padding-bottom:.3rem;border-bottom:1px solid var(--line)}h3{font-size:1.15rem}
+p,li{color:#33313c}
+a{color:var(--violet-dark)}
+code{background:var(--violet-pale);color:#3a2b8c;padding:.12em .4em;border-radius:5px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:.9em}
+pre{background:var(--code);color:#E6EDF3;padding:1.1rem 1.25rem;border-radius:10px;overflow-x:auto;font-size:.85rem;line-height:1.6}
+pre code{background:none;color:inherit;padding:0}
+blockquote{margin:1.2em 0;padding:.4em 1.1em;border-left:4px solid var(--violet);background:var(--violet-pale);border-radius:0 8px 8px 0;color:var(--muted)}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.92rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5rem .75rem;text-align:left}
+th{background:var(--violet-pale)}
+hr{border:none;border-top:1px solid var(--line);margin:2.2em 0}
+img{max-width:100%}
+</style></head><body>
+<div class="topbar"><a class="brand" href="../index.html">🎨 image-editor</a><a href="../index.html">Home</a><a href="user-guide.html">User Guide</a><a href="pro-guide.html">Pro Guide</a><a href="installation.html">Install</a><a href="architecture.html">Architecture</a><a href="analysis.html">Analysis</a><a href="plan.html" class="active" >Plan</a><a href="changelog.html">Changelog</a></div>
+<main><h1 id="image-editor-implementation-plan">image-editor — Implementation Plan</h1>
+<blockquote>
+<p>Companion to <a href="analysis.html">analysis.md</a>. Turns the research into a concrete,
+phased build. Reuses <code>image_selector</code>'s conventions: PySide6/Qt UI, Qt-decoupled
+pure-array ops, atomic Unicode-safe full-resolution save.</p>
+<p>Date: 2026-09-11 · Status: planning</p>
+</blockquote>
+<hr />
+<h2 id="guiding-constraints-from-analysis-0">Guiding constraints (from analysis §0)</h2>
+<ol>
+<li><strong>Full-resolution, non-destructive</strong> — preview on a proxy, always render the
+   final at native resolution with format/quality control.</li>
+<li><strong>Photoshop-capable, phone-app-simple</strong> — power (masks/layers/inpainting) lives
+   under a direct-on-image UI. Every feature ships an algorithm <em>and</em> a simple
+   interaction, together.</li>
+<li><strong>Models are optional</strong> — phases 1–5 run with zero ML deps; ML degrades
+   gracefully when a model/GPU is absent.</li>
+</ol>
+<hr />
+<h2 id="target-architecture">Target architecture</h2>
+<p>MVC like <code>image_selector</code>, but the "model" grows from a flat <code>EditState</code> into a
+<code>Document</code> (layer stack). The <strong>core is Qt-free</strong> so it can back an MCP server later.</p>
+<pre><code>image-editor/
+├── main.py                   # entry point — boots Qt, opens Document, wires window
+├── config.py                 # JSON config (~/.config/image-editor/)
+├── img_io.py                 # COPIED from image_selector — Unicode-safe imread/imwrite
+├── core/                     # zero Qt imports — pure numpy/opencv
+│   ├── document.py           # Document, layer stack, render(), history
+│   ├── layers.py             # Layer types (Adjustment, Heal, Pixel, ...)
+│   ├── mask.py               # Mask type + sources (shapes, brush, parametric, ML)
+│   ├── ops.py                # ported edit_ops.py — brightness/contrast/curves/...
+│   ├── film_luts.py          # COPIED from image_selector (film sims as ops)
+│   ├── curves.py             # monotone-spline → 256-LUT
+│   ├── blend.py              # alpha composite, blend modes, seamlessClone, colour-match
+│   ├── heal.py               # inpaint dispatch: telea | patchmatch | lama
+│   ├── render.py             # proxy vs full-res rendering, export (quality/format)
+│   └── backends/             # ML wrappers, lazy-imported, optional
+│       ├── segment.py        # SAM 2 + rembg  (returns a Mask)
+│       └── inpaint_lama.py   # LaMa erase (+ optional SD)
+├── widgets/                  # Qt view layer
+│   ├── main_window.py        # window, toolbar, keyboard, open/save
+│   ├── canvas.py             # zoom/pan preview (port preview_widget.py) + gestures
+│   ├── tool_overlay.py       # on-canvas brush/shape/handles (port crop overlay)
+│   ├── tools_panel.py        # the simple tool rail (Erase, Adjust, Curves, Crop...)
+│   └── adjust_panel.py       # slider/curve UI for the active tool
+├── app_controller.py         # actions ↔ Document ↔ widgets
+├── requirements.txt
+└── docs/{analysis.md, plan.md, changelog.md, versioning/...}
+</code></pre>
+<h3 id="core-data-model">Core data model</h3>
+<pre><code class="language-python"># core/mask.py
+@dataclass
+class Mask:
+    data: np.ndarray            # float32 HxW in [0,1], image-resolution (or None = all-ones)
+    invert: bool = False
+    feather_px: float = 0.0     # gaussian fallback
+    edge_aware: bool = False    # guided-filter refine against image
+    def resolve(self, img) -&gt; np.ndarray: ...   # -&gt; concrete float32 HxW in [0,1]
+
+# core/layers.py
+@dataclass
+class Layer:
+    kind: str                   # &quot;adjust&quot; | &quot;heal&quot; | &quot;pixel&quot;
+    params: dict                # op name + values, or heal engine, or rgba+transform
+    mask: Mask | None = None
+    blend_mode: str = &quot;normal&quot;
+    opacity: float = 1.0
+    visible: bool = True
+
+# core/document.py
+@dataclass
+class Document:
+    base: np.ndarray            # immutable original BGR (full res)
+    layers: list[Layer]
+    crop_rect: tuple | None = None
+    rotation: int = 0
+    def render(self, scale: float = 1.0) -&gt; np.ndarray: ...   # proxy or full-res
+</code></pre>
+<p><code>render()</code> = start from (rotated, cropped) base, apply each visible layer
+top-to-bottom via <code>blend.composite(base, effect, mask, mode, opacity)</code>. The
+<strong>same method</strong> renders the proxy (scale&lt;1, for live preview) and the full-res
+export (scale=1) — guaranteeing what you see is what you save.</p>
+<hr />
+<h2 id="phase-0-project-scaffold-05-day">Phase 0 — Project scaffold  <em>(0.5 day)</em></h2>
+<ul>
+<li><code>main.py</code>, <code>config.py</code>, <code>img_io.py</code> (copy), <code>requirements.txt</code>
+  (<code>PySide6</code>, <code>opencv-contrib-python</code>, <code>numpy</code>, <code>Pillow</code>, <code>send2trash</code>).</li>
+<li><code>widgets/main_window.py</code> + <code>widgets/canvas.py</code>: open an image, zoom/pan/fit
+  (port <code>preview_widget.py</code>), <strong>Save As</strong> with format + JPEG-quality control
+  (atomic tempfile → <code>shutil.move</code> → <code>os.utime</code>, ported from <code>image_selector</code>).</li>
+<li><strong>Milestone:</strong> open a 24 MP photo, zoom/pan smoothly, save a full-res copy at
+  chosen quality. <em>This alone already beats the phone-app resolution loss.</em></li>
+</ul>
+<h2 id="phase-1-document-layers-compositor-masks-34-days-the-spine">Phase 1 — Document, layers, compositor, masks  <em>(3–4 days)</em> — the spine</h2>
+<ul>
+<li><code>core/document.py</code>, <code>core/layers.py</code>, <code>core/blend.py</code> (alpha composite + core
+  blend modes: normal/multiply/screen/overlay).</li>
+<li><code>core/mask.py</code> with sources: <strong>brush</strong>, <strong>circle/ellipse</strong>, <strong>linear/radial
+  gradient</strong>, <strong>parametric/luminosity</strong> (mask from luminance sliders).</li>
+<li>Feathering: <code>cv2.GaussianBlur</code> (cheap) + <strong>edge-aware</strong> via
+  <code>cv2.ximgproc.guidedFilter</code> using the image as guide.</li>
+<li><code>widgets/tool_overlay.py</code>: paint/drag masks directly on the canvas; live proxy
+  preview with the 50 ms debounce pattern from <code>image_selector</code>.</li>
+<li>Undo/redo stack over layer operations.</li>
+<li><strong>Milestone:</strong> brush a region, see a visible mask, feather it edge-aware.</li>
+</ul>
+<h2 id="phase-2-local-adjustments-2-days">Phase 2 — Local adjustments  <em>(2 days)</em></h2>
+<ul>
+<li>Port <code>edit_ops.py</code> → <code>core/ops.py</code> and <code>film_luts.py</code> (unchanged math).</li>
+<li>Wrap each op as an <strong>AdjustmentLayer</strong>; global = all-ones mask (one code path).</li>
+<li><code>widgets/adjust_panel.py</code>: sliders for exposure/contrast/saturation/shadows/
+  highlights + film-sim picker.</li>
+<li>Simple UX: "drag on the sky → it gets a darkened-sky adjust layer with an
+  auto luminosity+gradient mask" — no layer jargon exposed.</li>
+<li><strong>Milestone:</strong> apply contrast to only the shadows; brighten only a brushed area.</li>
+</ul>
+<h2 id="phase-3-curves-12-days">Phase 3 — Curves  <em>(1–2 days)</em></h2>
+<ul>
+<li><code>core/curves.py</code>: control points → monotone cubic spline → 256-LUT
+  (hand-rolled PCHIP to avoid the SciPy dep) → <code>cv2.LUT</code>.</li>
+<li>Master RGB + per-channel R/G/B via a single <code>(256,1,3)</code> LUT; Lab L/a/b mode later.</li>
+<li>Curve editor widget (draggable points on a histogram backdrop); curves are just
+  another op → automatically maskable + layerable.</li>
+<li><strong>Milestone:</strong> S-curve contrast; per-channel colour grade; masked curve.</li>
+</ul>
+<h2 id="phase-4-classical-heal-erase-12-days">Phase 4 — Classical heal / erase  <em>(1–2 days)</em></h2>
+<ul>
+<li><code>core/heal.py</code>: dispatch by mask size → <code>cv2.inpaint</code> (Telea) for tiny defects,
+  <strong>PatchMatch</strong> for textured self-similar backgrounds.</li>
+<li>HealLayer stores the mask + engine; result cached, re-render aware.</li>
+<li><strong>Milestone:</strong> remove dust/blemishes/small distractions cleanly, CPU-only.</li>
+</ul>
+<h2 id="phase-5-seamless-paste-colour-match-2-days">Phase 5 — Seamless paste + colour match  <em>(2 days)</em></h2>
+<ul>
+<li><code>core/blend.py</code>: <code>cv2.seamlessClone</code> (NORMAL/MIXED) for pasted regions;
+  Lab mean/std colour transfer + <code>skimage.exposure.match_histograms</code>
+  (add <code>scikit-image</code>) to make a filled/pasted region match its surroundings.</li>
+<li>Auto "match colour to surroundings" runs after any heal/paste, then feather.</li>
+<li><strong>Milestone:</strong> paste an object from another photo with an invisible seam;
+  colour-match a patch.</li>
+</ul>
+<blockquote>
+<p><strong>Phases 0–5 ship a genuinely useful editor with zero ML dependencies.</strong>
+Everything below is additive and optional.</p>
+</blockquote>
+<h2 id="phase-6-ai-segmentation-23-days">Phase 6 — AI segmentation  <em>(2–3 days)</em></h2>
+<ul>
+<li><code>core/backends/segment.py</code> behind a lazy import + capability check:
+  <strong>SAM 2</strong> (click/box → precise mask) and <strong>rembg/U²-Net</strong> (one-click subject or
+  background cutout). Output is a plain <code>Mask</code> → flows into the existing engine.</li>
+<li>Run via <strong>ONNX Runtime</strong> (CPU default; GPU if available). Missing model/dep →
+  feature hidden, manual brush still works.</li>
+<li>UX: <strong>tap the person → mask appears</strong>; adjust with brush.</li>
+<li><strong>Milestone:</strong> one tap selects a person accurately.</li>
+</ul>
+<h2 id="phase-7-lama-erase-23-days-the-headline-feature">Phase 7 — LaMa erase  <em>(2–3 days)</em> — the headline feature</h2>
+<ul>
+<li><code>core/backends/inpaint_lama.py</code> (<code>iopaint</code>/<code>simple-lama-inpainting</code>, ONNX/PyTorch).</li>
+<li>Wire "Erase" to auto-pick engine: tiny mask → <code>cv2.inpaint</code>; person/object mask →
+  <strong>LaMa</strong>; then auto colour-match + feather (Phase 5).</li>
+<li>Graceful fallback to PatchMatch when LaMa unavailable.</li>
+<li><strong>Milestone:</strong> tap a person → Erase → they're gone, background plausibly filled,
+  saved at full resolution.</li>
+</ul>
+<h2 id="phase-8-optional-extras-as-desired">Phase 8 — Optional extras  <em>(as desired)</em></h2>
+<ul>
+<li>Stable-Diffusion inpaint/outpaint ("erase and replace with…", extend canvas) —
+  GPU-gated.</li>
+<li>Port <code>ai_edit.py</code> Claude/Ollama bridge for text-prompt global looks.</li>
+<li>RAW (<code>rawpy</code>) / HEIC (<code>pillow-heif</code>) input; batch apply a recipe.</li>
+</ul>
+<hr />
+<h2 id="phase-9-pro-grade-capabilities-the-professional-look">Phase 9 — Pro-grade capabilities  <em>(the "professional look")</em></h2>
+<p>From the professional-editing research in <a href="analysis.html">analysis.md §11</a>. Ordered by
+<strong>leverage on a professional result ÷ effort</strong>. Items 9.1–9.6 are pure OpenCV/NumPy
+(no new deps) and slot into the existing layer/mask/curve engine — do these first.
+9.7–9.10 follow the optional-backend pattern proven with LaMa/SAM.</p>
+<h3 id="no-new-dependencies-highest-leverage-first">No new dependencies (highest leverage first)</h3>
+<ul>
+<li><strong>9.1 — Colour grading (HSL + colour balance)</strong> — per-hue <strong>saturation/luminance</strong>
+  targeting, and <strong>shadow/midtone/highlight colour wheels</strong> (split-tone). The biggest
+  "pro colour" lever we lack (Capture One's headline). New <code>adjust</code> ops; maskable like
+  the rest. <em>(2–3 days)</em></li>
+<li><strong>9.2 — White-balance eyedropper + Kelvin temp</strong> — click a neutral pixel to set WB;
+  temperature in approximate Kelvin. <em>(1 day)</em></li>
+<li><strong>9.3 — Clarity / Texture / Dehaze</strong> — midtone local-contrast (unsharp on a large
+  radius), fine-detail texture, and dark-channel-prior haze removal. Maskable. <em>(2 days)</em></li>
+<li><strong>9.4 — Sharpening (capture + output)</strong> — unsharp / high-pass sharpen, plus an
+  <strong>output-sharpening</strong> step at export sized for screen vs print. <em>(1–2 days)</em></li>
+<li><strong>9.5 — Dodge &amp; burn tool</strong> — a dedicated brush that paints local exposure up/down;
+  mostly reuses the masked-exposure layer path. <em>(1 day)</em></li>
+<li><strong>9.6 — Frequency separation (skin)</strong> — split low (tone) / high (texture) frequency so
+  skin can be smoothed while keeping pores; a portrait staple. Maskable. <em>(1–2 days)</em></li>
+<li><strong>9.7 — Finishing: vignette + film grain</strong> — creative edge darkening and grain to
+  finish a graded look. <em>(1 day)</em></li>
+<li><strong>9.8 — Presets + basic batch</strong> — save an adjustment recipe (an <code>.iedit</code> <strong>without</strong>
+  the pixel layers) and apply it to any image or a folder. Consistency = professionalism.
+  Reuses <code>core/project.py</code>. <em>(1–2 days)</em></li>
+</ul>
+<h3 id="optional-backends-bigger-higher-image-quality-tier">Optional backends (bigger, higher image-quality tier)</h3>
+<ul>
+<li><strong>9.9 — RAW input</strong> (<code>rawpy</code> / libraw) — the biggest <em>image-quality</em> gap: true highlight
+  recovery and white balance come from RAW, not JPEG. Also HEIC (<code>pillow-heif</code>). <em>(2–3 days)</em></li>
+<li><strong>9.10 — Denoise</strong> — classical <code>cv2.fastNlMeansDenoisingColored</code> now; an <strong>AI denoise</strong>
+  model later (the DxO DeepPRIME niche) for high-ISO. <em>(classical 1 day; ML more)</em></li>
+<li><strong>9.11 — Lens &amp; perspective correction</strong> — distortion / vignetting / chromatic-aberration
+  and keystone / horizon straighten via OpenCV <code>undistort</code> + perspective transform;
+  manual sliders first, lens profiles later. <em>(2–3 days)</em></li>
+<li><strong>9.12 — AI super-resolution / upscale</strong> — <strong>Real-ESRGAN</strong> via ONNX Runtime (reuses the
+  lazy <code>core/backends/</code> pattern) to enlarge for print without softening; optional face
+  recovery. ⚠️ check model licence. <em>(2–3 days)</em></li>
+</ul>
+<p><strong>Suggested order:</strong> 9.2 → 9.4 → 9.3 → 9.1 → 9.5 → 9.8 → 9.6 → 9.7, then the backend tier
+9.9 → 9.10 → 9.12 → 9.11. Until RAW/denoise/upscale land, pair image-editor with a free RAW
+processor (Darktable / RawTherapee) for those steps.</p>
+<hr />
+<h2 id="cross-cutting-concerns">Cross-cutting concerns</h2>
+<ul>
+<li><strong>Performance:</strong> proxy preview at longest-side ≤ ~2000 px; full-res only on
+  export. Cache each layer's rendered output; invalidate on param/mask change.
+  Heavy ops (heal/ML) run in a <code>QThread</code> (port <code>_AiWorker</code>) so the UI never blocks.</li>
+<li><strong>Non-destructive project files:</strong> optional <code>.iedit</code> sidecar (JSON of the layer
+  stack) so an edit can be reopened and revised; the pixel export stays separate.</li>
+<li><strong>Licensing:</strong> pin exact model versions; record each weight's licence before
+  shipping (some are non-commercial) — see analysis §8.</li>
+<li><strong>Testing:</strong> pytest over <code>core/</code> (pure arrays, no Qt) — golden-image tests for
+  ops/curves/blend; mask math unit tests; a tiny fixture image set.</li>
+<li><strong>Docs &amp; versioning:</strong> mirror <code>image_selector</code> — <code>docs/versioning/vX.Y.Z/</code>
+  with <code>plan.md</code> / <code>changelog.md</code>, and keep <code>docs/analysis.md</code> current.</li>
+</ul>
+<h2 id="rough-sequencing">Rough sequencing</h2>
+<table>
+<thead>
+<tr>
+<th>Milestone</th>
+<th>Phases</th>
+<th>Outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>M1 — "better than the phone"</strong></td>
+<td>0–3</td>
+<td>full-res open/edit/save, masks, local adjust, curves — no ML</td>
+</tr>
+<tr>
+<td><strong>M2 — classical retouch</strong></td>
+<td>4–5</td>
+<td>heal small stuff, seamless paste, colour match</td>
+</tr>
+<tr>
+<td><strong>M3 — "erase anyone"</strong></td>
+<td>6–7</td>
+<td>SAM tap-select + LaMa erase, the headline feature</td>
+</tr>
+<tr>
+<td><strong>M4 — creative/optional</strong></td>
+<td>8</td>
+<td>SD replace/outpaint, AI looks, RAW/HEIC, batch</td>
+</tr>
+<tr>
+<td><strong>M5 — pro-grade look</strong></td>
+<td>9</td>
+<td>colour grading/HSL, WB picker, clarity/dehaze, sharpening, dodge &amp; burn, frequency separation, presets/batch, then RAW · denoise · upscale · lens correction</td>
+</tr>
+<tr>
+<td></content></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table></main></body></html>

@@ -1,0 +1,645 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analysis — image-editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--violet:#7C5CFC;--violet-dark:#5B3EE8;--violet-pale:#F3F0FF;--ink:#2A2833;--muted:#56545F;--line:#E6E5EA;--bg:#FFFFFF;--code:#0D1117}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Inter',-apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink);background:var(--bg);line-height:1.7}
+.topbar{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.95);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:.7rem 1.25rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap}
+.topbar .brand{font-weight:700;color:var(--violet);text-decoration:none;margin-right:.5rem}
+.topbar a{font-size:.85rem;color:var(--muted);text-decoration:none}
+.topbar a:hover{color:var(--violet)}
+.topbar a.active{color:var(--violet);font-weight:600}
+main{max-width:820px;margin:0 auto;padding:2.5rem 1.25rem 5rem}
+h1,h2,h3,h4{line-height:1.25;color:#17161E;margin:1.8em 0 .6em}
+h1{font-size:2rem;margin-top:.2em}h2{font-size:1.5rem;padding-bottom:.3rem;border-bottom:1px solid var(--line)}h3{font-size:1.15rem}
+p,li{color:#33313c}
+a{color:var(--violet-dark)}
+code{background:var(--violet-pale);color:#3a2b8c;padding:.12em .4em;border-radius:5px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:.9em}
+pre{background:var(--code);color:#E6EDF3;padding:1.1rem 1.25rem;border-radius:10px;overflow-x:auto;font-size:.85rem;line-height:1.6}
+pre code{background:none;color:inherit;padding:0}
+blockquote{margin:1.2em 0;padding:.4em 1.1em;border-left:4px solid var(--violet);background:var(--violet-pale);border-radius:0 8px 8px 0;color:var(--muted)}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.92rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5rem .75rem;text-align:left}
+th{background:var(--violet-pale)}
+hr{border:none;border-top:1px solid var(--line);margin:2.2em 0}
+img{max-width:100%}
+</style></head><body>
+<div class="topbar"><a class="brand" href="../index.html">🎨 image-editor</a><a href="../index.html">Home</a><a href="user-guide.html">User Guide</a><a href="pro-guide.html">Pro Guide</a><a href="installation.html">Install</a><a href="architecture.html">Architecture</a><a href="analysis.html" class="active" >Analysis</a><a href="plan.html">Plan</a><a href="changelog.html">Changelog</a></div>
+<main><h1 id="image-editor-feature-research-analysis">image-editor — Feature Research &amp; Analysis</h1>
+<blockquote>
+<p>Research analysis for a new <strong>standalone photo-editing</strong> desktop app. Not an
+image selector — a plain editor with <strong>Photoshop-grade capabilities but
+phone-app-level ease of use</strong>: erase people, apply an effect to only part of a
+picture, blend the result so the edit is invisible, colour/tone curves — and
+save at <strong>full original resolution</strong>.</p>
+<p>Date: 2026-09-11 · Status: research / pre-implementation</p>
+</blockquote>
+<hr />
+<h2 id="0-product-context-design-principles">0. Product context &amp; design principles</h2>
+<p><strong>The problem that started this.</strong> Editing is currently done in <strong>phone apps</strong>,
+which <em>destroy resolution</em>: they downscale the working image and re-compress on
+export, so a 24 MP original comes back as a soft, recompressed few-megapixel JPEG.
+There is no way to do a capable edit <em>and</em> keep the original pixels.</p>
+<p><strong>So the two non-negotiables are:</strong></p>
+<ol>
+<li><strong>Full-resolution, non-destructive.</strong> The original is never downscaled. The
+   preview may work on a scaled proxy for speed, but the <strong>final render always runs
+   the edit pipeline at native resolution</strong> and saves with quality/format control
+   (real JPEG quality, or PNG/TIFF). This is already how <code>image_selector</code> saves
+   (full-res render only at save, atomic + timestamp-preserving) — we keep that and
+   make it the headline feature. It is the single biggest advantage over any phone app.</li>
+<li><strong>Phone-app-simple, Photoshop-capable.</strong> The power (masks, layers, inpainting,
+   curves) lives <em>underneath</em> a UI that stays as approachable as Snapseed/Instagram:
+   - one big image, direct-on-image gestures (pinch-zoom, brush, drag-to-adjust),
+   - <strong>tap the person → Erase</strong>, <strong>drag on the sky → darker</strong>, not "create an
+     adjustment layer, add a luminosity mask, set blend mode",
+   - sensible auto-defaults (auto-feather, auto-pick inpaint engine, auto colour-match)
+     so the <em>simple</em> path needs no jargon, and the depth is opt-in.
+   - Snapseed is the model to study: pro results, thumb-friendly, no layer panel in
+     the user's face — the layer/mask machinery is an <em>implementation detail</em>, not
+     the interface.</li>
+</ol>
+<p>Every feature section below should be read through this lens: <strong>the algorithm is
+the Photoshop half; the interaction design is the phone-app half, and both must
+ship together.</strong></p>
+<hr />
+<h2 id="1-why-this-is-a-new-project-and-not-just-more-opencv">1. Why this is a new project (and not "just more OpenCV")</h2>
+<p>The features requested — <em>erasing people, applying contrast/effects to a selected
+region only, blending an edit to match its surroundings, colour and tone curves</em> —
+split into two very different tiers of difficulty:</p>
+<table>
+<thead>
+<tr>
+<th>Tier</th>
+<th>Technique</th>
+<th>Tooling</th>
+<th>Quality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Classical (OpenCV/NumPy)</strong></td>
+<td><code>cv2.inpaint</code> (Telea / Navier–Stokes), grey-world WB, LUT curves, <code>cv2.seamlessClone</code></td>
+<td>Already in <code>image_selector</code>'s <code>edit_ops.py</code></td>
+<td>Fine for scratches, dust, tiny blemishes and simple gradients — <strong>falls apart on anything textured or larger than a few dozen pixels</strong></td>
+</tr>
+<tr>
+<td><strong>Content-aware / ML</strong></td>
+<td>LaMa / diffusion inpainting, SAM2 segmentation, U²-Net matting, PatchMatch, gradient-domain blending</td>
+<td>New dependencies (PyTorch/ONNX + models)</td>
+<td>This is what "erase a person and you can't tell" actually requires</td>
+</tr>
+</tbody>
+</table>
+<p>This is the earlier point about "OpenCV is too simple": <code>cv2.inpaint</code> diffuses
+neighbouring colour into the hole. It cannot <strong>hallucinate plausible texture</strong>
+(grass, brick, a face behind the removed person), so removing a whole person
+leaves a smear. The sophisticated behaviour you want is fundamentally a
+<strong>machine-learning problem sitting on top of an OpenCV/NumPy plumbing layer</strong> —
+not a pure-OpenCV one. So <code>image-editor</code> keeps OpenCV for the fast pixel math and
+adds a model runtime (ONNX Runtime, optionally PyTorch) for the hard parts.</p>
+<p>The good news: the whole editing <em>architecture</em> from <code>image_selector</code> transfers
+directly — Qt-decoupled pure-array ops, an <code>EditState</code>, a fixed pipeline, atomic
+Unicode-safe saves. We extend that model from <em>global</em> state to <em>masked, layered</em>
+state.</p>
+<hr />
+<h2 id="2-the-one-foundation-everything-else-needs-selections-masks">2. The one foundation everything else needs: <strong>selections &amp; masks</strong></h2>
+<p>Every sophisticated feature below ("only on certain sections", "erase this
+person", "blend to match") is really <em>"do operation X, but only where mask M says
+so, and feather the boundary"</em>. So the mask engine is the core of the app, not an
+afterthought. This is exactly how Darktable and Lightroom are built: a module does
+one thing globally, and a <strong>mask</strong> restricts <em>where</em> it applies.</p>
+<h3 id="how-the-reference-tools-do-it">How the reference tools do it</h3>
+<ul>
+<li><strong>Drawn masks</strong> (Darktable): primitive shapes the user draws — <em>brush, circle,
+  ellipse, path, gradient</em>. Each shape stores geometry + a <strong>feather/border</strong>
+  radius and an opacity, and multiple shapes combine (union / intersection /
+  difference). (<a href="https://docs.darktable.org/usermanual/development/en/darkroom/masking-and-blending/masks/drawn/">darktable — drawn masks</a>)</li>
+<li><strong>Parametric / luminosity masks</strong> (Darktable): the mask is generated <em>from pixel
+  values</em> — e.g. "select pixels by how bright they are" via input sliders that can
+  be feathered inward for a smooth falloff. This is how you "apply contrast only to
+  the shadows" without drawing anything. (<a href="https://pixls.us/articles/luminosity-masking-in-darktable/">Luminosity masking in darktable</a>)</li>
+<li><strong>Edge-aware feathering</strong> (Darktable): instead of a plain Gaussian blur on the
+  mask edge, the mask edge is snapped to <em>image</em> edges using a guided filter, so a
+  sky mask stops at the horizon. (<a href="https://docs.darktable.org/usermanual/development/en/darkroom/masking-and-blending/masks/refinement-controls/">mask refinement controls</a>)</li>
+<li><strong>AI object masks</strong> (modern Darktable / Photoshop "Select Subject"): a click or
+  box is handed to a segmentation model that returns a pixel-perfect mask (see §3).</li>
+</ul>
+<h3 id="implementation-for-image-editor">Implementation for image-editor</h3>
+<ul>
+<li>Represent a mask as a single-channel <code>float32</code> array in <code>[0,1]</code> (0 = unaffected,
+  1 = full effect) at image resolution. This unifies <em>every</em> mask source — drawn,
+  parametric, or ML-produced — into one type the pipeline consumes.</li>
+<li>Mask sources compose into a stack with blend modes (add / subtract / intersect).</li>
+<li><strong>Feathering</strong> = <code>cv2.GaussianBlur</code> on the mask for the cheap version; a
+  <strong>guided filter</strong> (<code>cv2.ximgproc.guidedFilter</code>, from <code>opencv-contrib-python</code>)
+  for the edge-aware version, using the image as guide. This is the single most
+  important quality lever in the whole app.</li>
+<li>Apply is a simple alpha composite: <code>out = base*(1-m) + effect*m</code> — see §6.</li>
+</ul>
+<hr />
+<h2 id="3-erasing-people-objects-inpainting">3. Erasing people &amp; objects (inpainting)</h2>
+<p>Two sub-problems: <strong>(a) get the mask of the thing to remove</strong>, and
+<strong>(b) fill the hole convincingly</strong>.</p>
+<h3 id="a-getting-the-mask-segmentation">(a) Getting the mask — segmentation</h3>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th>What it is</th>
+<th>Library / model</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Manual brush</strong></td>
+<td>user paints over the person</td>
+<td>our own mask engine (§2)</td>
+<td>always available, zero deps</td>
+</tr>
+<tr>
+<td><strong>SAM 2</strong> (Segment Anything Model 2, Meta)</td>
+<td>click a point or drag a box → pixel-perfect mask; foundation model, prompt-based (points/boxes/masks)</td>
+<td><code>ultralytics</code> SAM-2 or <code>segment-anything-2</code>; ONNX export possible</td>
+<td>~44 fps inference, real-time feedback; the gold standard for "click the person, get the mask" (<a href="https://docs.ultralytics.com/models/sam-2">SAM 2 · Ultralytics</a>, <a href="https://arxiv.org/pdf/2503.00042">SAM2 overview (arXiv)</a>)</td>
+</tr>
+<tr>
+<td><strong>U²-Net / rembg</strong></td>
+<td>whole-image foreground/background matting</td>
+<td><code>rembg</code> (bundles <code>u2net</code>, <code>u2net_human_seg</code>, BRIA RMBG) via ONNX Runtime</td>
+<td>great for "remove the background", "cut out the subject"; <code>u2net_human_seg</code> is people-specific (<a href="https://github.com/danielgatis/rembg">rembg</a>, <a href="https://learnopencv.com/u2-net-image-segmentation/">U²-Net explained</a>)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Recommendation:</strong> ship SAM 2 (interactive, precise, this is what makes "erase
+that person" feel magic) + <code>rembg</code> for one-click subject/background cutouts, and
+always keep the manual brush as the dependency-free fallback.</p>
+<h3 id="b-filling-the-hole-inpainting">(b) Filling the hole — inpainting</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Engine</th>
+<th>When it wins</th>
+<th>Cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Telea / Navier–Stokes</strong></td>
+<td><code>cv2.inpaint</code></td>
+<td>1–20 px defects: dust, scratches, sensor spots, tiny blemishes</td>
+<td>instant, CPU, already have it</td>
+</tr>
+<tr>
+<td><strong>PatchMatch</strong> ("content-aware fill" / GIMP Resynthesizer)</td>
+<td>classical, copies best-matching patches from elsewhere in the image</td>
+<td>textured but <em>self-similar</em> backgrounds (grass, gravel, water, sky)</td>
+<td>fast-ish, CPU, no model</td>
+</tr>
+<tr>
+<td><strong>LaMa</strong> (resolution-robust large-mask inpainting)</td>
+<td><code>iopaint</code> / <code>simple-lama-inpainting</code>, ONNX or PyTorch</td>
+<td><strong>the default for object/person removal</strong> — hallucinates plausible structure over large holes, matches surroundings</td>
+<td>~100–500 ms GPU, seconds CPU; ~200 MB model</td>
+</tr>
+<tr>
+<td><strong>Stable-Diffusion inpaint</strong></td>
+<td><code>iopaint</code> with an SD model</td>
+<td><em>replace</em> with new content ("erase and put grass"), outpainting/extending canvas</td>
+<td>heavy (GB-scale model, GPU strongly preferred)</td>
+</tr>
+</tbody>
+</table>
+<p>How the reference tool (<strong>IOPaint</strong>, formerly Lama-Cleaner) works end-to-end:
+<em>load image → paint a mask over the unwanted object → an erase model (LaMa) fills
+the region to match surrounding pixels; a diffusion model can instead replace or
+outpaint.</em> This is exactly the mask→fill pipeline we build. (<a href="https://github.com/Sanster/IOPaint">IOPaint on GitHub</a>)</p>
+<p><strong>Recommendation:</strong> a single "Erase" action that picks the engine by mask size —
+<code>cv2.inpaint</code> for tiny masks, <strong>LaMa</strong> for anything person/object-sized — with SD
+inpaint as an optional "replace with…" mode behind a flag. IOPaint can even be
+vendored as a library rather than reimplemented.</p>
+<hr />
+<h2 id="4-local-adjustments-contrasteffects-on-certain-sections-only">4. Local adjustments — "contrast/effects on certain sections only"</h2>
+<p>This is §2 (masks) applied to the <em>existing</em> <code>edit_ops.py</code> operations. Nothing new
+in the math — the novelty is that each adjustment carries a mask and a blend mode.</p>
+<ul>
+<li><strong>Lightroom / Darktable model:</strong> an adjustment "module" (exposure, contrast,
+  colour, a film LUT…) runs, then its output is blended into the image <em>through a
+  mask</em>. Stack several masked adjustments and you get dodge-and-burn, selective
+  saturation, darkened-sky, brightened-subject, etc.</li>
+<li><strong>Parametric masks</strong> let "contrast in the shadows only" work with zero drawing —
+  the mask is derived from luminance. (<a href="https://www.darktable.org/2015/01/luminosity-masks-in-darktable/">darktable — luminosity masks</a>)</li>
+<li><strong>Feathering radius is the make-or-break control</strong> for avoiding hard,
+  obviously-edited transitions. (<a href="https://docs.darktable.org/usermanual/development/en/darkroom/masking-and-blending/masks/refinement-controls/">mask refinement</a>)</li>
+</ul>
+<h3 id="implementation-for-image-editor_1">Implementation for image-editor</h3>
+<ul>
+<li>Reuse <code>apply_contrast</code>, <code>apply_exposure</code>, <code>apply_saturation</code>, <code>apply_shadows</code>,
+  <code>apply_highlights</code>, the film LUTs, curves (§5), etc. <strong>unchanged</strong>.</li>
+<li>Wrap each in an <strong>adjustment layer</strong>: <code>{op, params, mask, blend_mode, opacity}</code>.</li>
+<li>Compose the layer stack top-to-bottom (see §6). A global adjustment is just a
+  layer whose mask is all-ones — so global and local share one code path.</li>
+</ul>
+<hr />
+<h2 id="5-colour-tone-curves">5. Colour &amp; tone curves</h2>
+<p>The classic diagonal-line control: input on X, output on Y; identity is the
+straight line; a curve above brightens, below darkens, and an <strong>S-curve adds
+contrast</strong>. Points are joined by a <strong>monotonic spline</strong> (not plain cubic, which
+overshoots and causes tonal reversals). (<a href="https://docs.darktable.org/usermanual/development/en/module-reference/processing-modules/tone-curve/">darktable — tone curve</a>)</p>
+<p>Key design decisions the reference tools make:</p>
+<ul>
+<li><strong>Which channel(s):</strong></li>
+<li><em>RGB master</em> curve → affects luminance-ish, simple.</li>
+<li><em>Per-channel R / G / B</em> curves → colour grading, but applying a non-linear
+    curve independently per channel <strong>shifts hue</strong> — a known artefact to warn about
+    or mitigate. (<a href="https://docs.darktable.org/usermanual/development/en/module-reference/processing-modules/tone-curve/">tone curve — colour preservation</a>)</li>
+<li><em>Lab / "separated channels"</em> (Darktable tone curve) → independent control of
+    <strong>L</strong> (luminance) vs <strong>a/b</strong> (chroma) so tonal contrast doesn't wreck colour.</li>
+<li><strong>Interpolation:</strong> monotonic cubic spline (PCHIP-style) through user points.</li>
+</ul>
+<h3 id="implementation-for-image-editor_2">Implementation for image-editor</h3>
+<ul>
+<li>A curve = a list of control points → build a <strong>256-entry LUT</strong> via monotonic
+  spline interpolation (<code>scipy.interpolate.PchipInterpolator</code>, or a small
+  hand-rolled monotone cubic to avoid the SciPy dep), then <code>cv2.LUT</code>. This slots
+  straight into the existing <code>_make_lut</code> / <code>apply_lut</code> helpers in <code>edit_ops.py</code>.</li>
+<li>Offer <strong>Master RGB + per-channel R/G/B</strong> first (a <code>(256,1,3)</code> LUT does all four
+  in one <code>cv2.LUT</code> call), and a <strong>Lab L/a/b</strong> mode later for hue-safe contrast.</li>
+<li>Curves become just another op → automatically maskable (§4) and layerable.</li>
+</ul>
+<hr />
+<h2 id="6-blending-the-final-picture-to-match-the-invisible-edit">6. Blending the final picture to match (the "invisible edit")</h2>
+<p>Two distinct blending problems, often confused:</p>
+<h3 id="a-boundary-blending-hide-the-seam-of-a-pastecomposite">(a) Boundary blending — hide the seam of a paste/composite</h3>
+<p><strong>Poisson image editing / gradient-domain blending</strong> (Pérez, Gangnet &amp; Blake,
+SIGGRAPH 2003): instead of copying pixel <em>values</em> across a boundary, it copies the
+source region's <strong>gradients</strong> and solves a Poisson equation so the pasted region's
+<em>colours/brightness bend to meet</em> the destination at the seam — the transition
+becomes invisible. This is precisely how you "blend the final picture to match".
+Directly available as <strong><code>cv2.seamlessClone(src, dst, mask, center, flags)</code></strong> with
+<code>NORMAL_CLONE</code> / <code>MIXED_CLONE</code> / <code>MONOCHROME_TRANSFER</code> modes.
+(<a href="https://docs.opencv.org/4.x/df/da0/group__photo__clone.html">OpenCV seamless cloning</a>,
+<a href="https://www.cs.jhu.edu/~misha/Fall07/Papers/Perez03.pdf">Poisson image editing (Pérez et al.)</a>,
+<a href="https://learnopencv.com/seamless-cloning-using-opencv-python-cpp/">learnopencv walkthrough</a>)</p>
+<ul>
+<li>Good for: pasting an object from another photo, patching a region with borrowed
+  content, face/sky swaps.</li>
+<li><code>MIXED_CLONE</code> preserves destination texture through the seam (better over busy
+  backgrounds); <code>NORMAL_CLONE</code> fully replaces.</li>
+</ul>
+<h3 id="b-colourtone-matching-make-the-edited-region-belong">(b) Colour/tone matching — make the edited region <em>belong</em></h3>
+<p>Even with a perfect seam, a pasted or inpainted region can be the wrong colour
+temperature or exposure. <strong>Colour transfer</strong> matches the statistics
+(mean + standard deviation per channel, classically in Lab space — Reinhard et al.)
+of the edit region to a reference region so its palette matches. Histogram matching
+(<code>skimage.exposure.match_histograms</code>) is the stronger variant.</p>
+<h3 id="implementation-for-image-editor_3">Implementation for image-editor</h3>
+<ul>
+<li><strong>Seamless paste tool:</strong> user places/masks a source region → <code>cv2.seamlessClone</code>.</li>
+<li><strong>"Match colour to surroundings"</strong> step for any inpaint/paste: sample the ring of
+  pixels <em>around</em> the mask, transfer Lab mean/std (or histogram-match) onto the
+  filled region, then feather. Run it <em>after</em> LaMa fill for a near-invisible erase.</li>
+<li>The universal compositor for §2–§6:
+  <code>out = base * (1 - mask) + effect * mask          # feathered mask in [0,1]
+  # for paste/heal where geometry moves, use cv2.seamlessClone instead</code></li>
+</ul>
+<hr />
+<h2 id="7-layers-non-destructive-document-model">7. Layers &amp; non-destructive document model</h2>
+<p>To hold all of the above, the <code>EditState</code> from <code>image_selector</code> grows into a small
+<strong>document model</strong> (like a lightweight PSD / Darktable history stack):</p>
+<pre><code>Document
+├── base image (immutable original, BGR/float)
+├── ordered layer stack (bottom → top)
+│   ├── AdjustmentLayer { op, params, mask, blend_mode, opacity, visible }
+│   ├── HealLayer       { mask, engine: telea|patchmatch|lama, params }
+│   ├── PixelLayer      { rgba, transform }          # pasted / composited content
+│   └── ...
+├── crop_rect, rotation                              # from existing pipeline
+└── history (undo/redo of layer ops)
+</code></pre>
+<p>Rendering = start from base, apply each visible layer top-to-bottom via its
+mask + blend mode. Everything stays <strong>non-destructive</strong> and reproducible, matching
+the design goal <code>image_selector</code> already committed to (pure-array ops, full-res
+render only at save). Save-as remains atomic + Unicode-safe + timestamp-preserving,
+reusing <code>img_io.py</code> and the tempfile-then-<code>shutil.move</code> pattern.</p>
+<hr />
+<h2 id="8-recommended-tech-stack">8. Recommended tech stack</h2>
+<p>Reuse everything proven in <code>image_selector</code>; add a model runtime.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Choice</th>
+<th>Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>UI</td>
+<td><strong>PySide6 / Qt</strong> (QPainter preview, zoom/pan)</td>
+<td>direct reuse of <code>preview_widget.py</code>, <code>edit_panel.py</code>, crop overlay</td>
+</tr>
+<tr>
+<td>Pixel math</td>
+<td><strong>OpenCV (+ <code>opencv-contrib-python</code> for <code>ximgproc</code> guided filter) + NumPy</strong></td>
+<td>reuse <code>edit_ops.py</code>, <code>film_luts.py</code>, LUT/curve helpers</td>
+</tr>
+<tr>
+<td>Curves</td>
+<td>monotone cubic spline → LUT (<code>scipy</code> PchipInterpolator <em>or</em> hand-rolled)</td>
+<td>keep deps light</td>
+</tr>
+<tr>
+<td>Segmentation</td>
+<td><strong>SAM 2</strong> (interactive) + <strong>rembg / U²-Net</strong> (one-click cutout)</td>
+<td>precise masks; the "click the person" magic</td>
+</tr>
+<tr>
+<td>Inpainting</td>
+<td><strong><code>cv2.inpaint</code></strong> (tiny) → <strong>LaMa</strong> (<code>iopaint</code>/<code>simple-lama-inpainting</code>, default) → optional <strong>SD inpaint</strong> (replace/outpaint)</td>
+<td>right engine per mask size</td>
+</tr>
+<tr>
+<td>Blending</td>
+<td><strong><code>cv2.seamlessClone</code></strong> (Poisson) + Lab colour transfer / histogram match (<code>scikit-image</code>)</td>
+<td>invisible seams + colour match</td>
+</tr>
+<tr>
+<td>Model runtime</td>
+<td><strong>ONNX Runtime</strong> first (CPU-friendly, easy install); <strong>PyTorch</strong> only where a model needs it</td>
+<td>Mario's box may be CPU-only; ONNX keeps it usable</td>
+</tr>
+<tr>
+<td>AI-assist (optional)</td>
+<td>keep the <code>ai_edit.py</code> Claude/Ollama bridge for text-driven global looks</td>
+<td>already built, complements manual local tools</td>
+</tr>
+</tbody>
+</table>
+<p><strong>GPU note:</strong> LaMa and SAM run on CPU (seconds) or GPU (sub-second). SD inpaint
+really wants a GPU. Structure model calls behind a <code>backends/</code> interface so a
+missing/absent GPU degrades gracefully (LaMa-CPU, or fall back to PatchMatch).</p>
+<h3 id="dependency-licence-snapshot">Dependency &amp; licence snapshot</h3>
+<table>
+<thead>
+<tr>
+<th>Package</th>
+<th>Purpose</th>
+<th>Model size</th>
+<th>Licence notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>opencv-contrib-python</code></td>
+<td>pixel ops + guided filter + seamlessClone</td>
+<td>—</td>
+<td>Apache-2.0</td>
+</tr>
+<tr>
+<td><code>onnxruntime</code></td>
+<td>run ONNX models on CPU/GPU</td>
+<td>—</td>
+<td>MIT</td>
+</tr>
+<tr>
+<td><code>rembg</code></td>
+<td>background/subject cutout</td>
+<td>~5–180 MB</td>
+<td>MIT (models vary — check BRIA RMBG terms)</td>
+</tr>
+<tr>
+<td>SAM 2 (<code>ultralytics</code> or <code>segment-anything-2</code>)</td>
+<td>interactive segmentation</td>
+<td>~40–350 MB</td>
+<td>check per-model (Apache/BSD; some non-commercial)</td>
+</tr>
+<tr>
+<td><code>iopaint</code> / <code>simple-lama-inpainting</code></td>
+<td>LaMa erase (+ optional SD)</td>
+<td>LaMa ~200 MB</td>
+<td>LaMa weights: <strong>verify licence before commercial use</strong></td>
+</tr>
+<tr>
+<td><code>scikit-image</code></td>
+<td>histogram matching / colour transfer</td>
+<td>—</td>
+<td>BSD</td>
+</tr>
+<tr>
+<td><code>scipy</code> (optional)</td>
+<td>monotone spline for curves</td>
+<td>—</td>
+<td>BSD</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>⚠️ <strong>Licensing matters here</strong> given Mario keeps a day job and ships side
+projects publicly: several segmentation/inpainting weights carry non-commercial
+or attribution terms distinct from their code. Pin exact model versions and
+record each licence before shipping.</p>
+</blockquote>
+<hr />
+<h2 id="9-suggested-build-order">9. Suggested build order</h2>
+<ol>
+<li><strong>Document + mask engine + layer compositor</strong> (§2, §7) — the spine. Drawn masks
+   (brush/gradient/shape) + feather + guided-filter edge-aware refinement.</li>
+<li><strong>Local adjustments</strong> (§4) — wrap existing <code>edit_ops</code> in masked layers. Immediate
+   payoff, no new heavy deps.</li>
+<li><strong>Curves</strong> (§5) — master + per-channel, LUT-based.</li>
+<li><strong>Classical heal/erase</strong> (§3b) — <code>cv2.inpaint</code> + PatchMatch for small stuff.</li>
+<li><strong>Seamless paste + colour match</strong> (§6) — <code>seamlessClone</code> + Lab transfer.</li>
+<li><strong>AI segmentation</strong> (§3a) — SAM 2 click-to-mask + rembg cutout, wired into the
+   mask engine.</li>
+<li><strong>LaMa erase</strong> (§3b) — the headline "remove a person" feature.</li>
+<li><strong>(Optional) SD inpaint / outpaint</strong>, and the <code>ai_edit</code> text-prompt bridge for
+   global looks.</li>
+</ol>
+<p>Phases 1–5 are pure OpenCV/NumPy/Qt (no models, works everywhere). Phases 6–8 add
+the ML runtime — the part that makes edits genuinely <em>sophisticated</em> rather than
+<em>simple</em>.</p>
+<hr />
+<h2 id="10-what-transfers-directly-from-image_selector">10. What transfers directly from <code>image_selector</code></h2>
+<ul>
+<li><code>img_io.py</code> — Unicode-safe imread/imwrite (keep verbatim).</li>
+<li><code>edit_ops.py</code> + <code>film_luts.py</code> — all become maskable layer ops unchanged.</li>
+<li><code>preview_widget.py</code> — zoom/pan/QPainter preview.</li>
+<li><code>edit_panel.py</code> crop overlay &amp; debounced live-preview pattern.</li>
+<li>Atomic, timestamp-preserving Save-As (tempfile → <code>shutil.move</code> → <code>os.utime</code>).</li>
+<li><code>ai_edit.py</code> Claude/Ollama bridge (optional global-look assist).</li>
+<li>The MVC discipline and "ops take a NumPy array, return a NumPy array, zero Qt
+  imports" rule — which is what lets the same pipeline back an MCP server later.</li>
+</ul>
+<hr />
+<h2 id="11-professional-grade-capabilities-research-2026">11. Professional-grade capabilities — research (2026)</h2>
+<blockquote>
+<p>Added after a research pass on <em>what actually makes photos look professional</em> and
+which tools deliver it, to steer image-editor toward pro-quality output. The goal:
+keep the phone-simple UX while adding the levers that separate an amateur edit from
+a professional one.</p>
+</blockquote>
+<h3 id="what-the-pros-actually-do-the-workflow">What the pros actually do (the workflow)</h3>
+<p>The consistent professional pipeline, across guides, is an <strong>ordered, non-destructive
+workflow</strong> — not random slider-pushing:</p>
+<ol>
+<li><strong>Cull</strong> ruthlessly (pick keepers; toss blurry/blinked).</li>
+<li><strong>Base correction on the RAW</strong> — white balance, exposure, highlight/shadow recovery.</li>
+<li><strong>Tone &amp; colour</strong> — contrast/curves, then <strong>colour grading</strong> (HSL + split-tone).</li>
+<li><strong>Local work</strong> — masked adjustments, <strong>dodge &amp; burn</strong> to shape light.</li>
+<li><strong>Retouch</strong> — heal/spot removal; <strong>frequency separation</strong> for skin.</li>
+<li><strong>Denoise</strong> (especially high-ISO) and <strong>lens/perspective correction</strong>.</li>
+<li><strong>Output</strong> — resize + <strong>output sharpening</strong> tuned for screen or print.</li>
+<li><strong>Consistency</strong> — a signature look applied as <strong>presets</strong> across a set; increasingly
+   an <strong>AI assistant</strong> trained on the photographer's style handles the mechanical steps.
+   (<a href="https://imagen-ai.com/valuable-tips/how-to-edit-photos-like-a-professional-editor/">Imagen — edit like a pro</a>,
+   <a href="https://filterpixel.com/blog/how-to-professionally-edit-photos">Filterpixel — repeatable workflow</a>,
+   <a href="https://fstoppers.com/education/complete-guide-frequency-separation-dodging-and-burning-and-color-grading-485517">Fstoppers — freq. separation / dodge &amp; burn / grading</a>)</li>
+</ol>
+<p>The "pro look" is mostly: <strong>accurate colour + white balance, deliberate light
+(dodge &amp; burn), clean colour grading, natural skin, low noise, and correct
+sharpening</strong> — applied non-destructively and consistently.</p>
+<h3 id="the-reference-tools-and-what-each-is-for">The reference tools (and what each is <em>for</em>)</h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Licence</th>
+<th>Known for</th>
+<th>Relevance to us</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Adobe Lightroom Classic</strong></td>
+<td>paid</td>
+<td>the default RAW workflow; GPU RAW; AI masks</td>
+<td>the workflow model to emulate</td>
+</tr>
+<tr>
+<td><strong>Capture One</strong></td>
+<td>paid</td>
+<td><strong>best colour tools</strong> &amp; skin rendering, tethering</td>
+<td>its colour-grading depth is the bar for our HSL/colour work</td>
+</tr>
+<tr>
+<td><strong>DxO PhotoLab</strong></td>
+<td>paid</td>
+<td><strong>DeepPRIME denoise</strong> + best lens corrections</td>
+<td>denoise + lens-correction are its moat — both are gaps for us</td>
+</tr>
+<tr>
+<td><strong>Darktable</strong></td>
+<td><strong>FOSS</strong></td>
+<td>scene-referred pipeline, 60+ modules, masks</td>
+<td>our closest open reference; algorithms we can mirror</td>
+</tr>
+<tr>
+<td><strong>RawTherapee</strong></td>
+<td><strong>FOSS</strong></td>
+<td>powerful RAW demosaic &amp; detail</td>
+<td>reference for RAW processing</td>
+</tr>
+<tr>
+<td><strong>Photoshop</strong></td>
+<td>paid</td>
+<td>pixel retouching, frequency separation, dodge &amp; burn</td>
+<td>the retouching techniques to implement</td>
+</tr>
+<tr>
+<td><strong>Topaz Photo AI</strong></td>
+<td>paid</td>
+<td>denoise / sharpen / <strong>upscale</strong> / face recovery</td>
+<td>what "AI enhance" means to users</td>
+</tr>
+<tr>
+<td><strong>Real-ESRGAN / Upscayl</strong></td>
+<td><strong>FOSS</strong></td>
+<td>AI <strong>super-resolution</strong>, rivals paid upscalers</td>
+<td>our open path to upscaling</td>
+</tr>
+<tr>
+<td>(<a href="https://www.findingtheuniverse.com/best-photo-editing-software/">Best editing software 2026</a>,</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><a href="https://www.topazlabs.com/best-image-upscalers">Topaz upscalers</a>,</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><a href="https://github.com/xinntao/Real-ESRGAN">Real-ESRGAN</a>)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="image-editor-today-vs-the-pro-gap">image-editor today vs. the pro gap</h3>
+<p><strong>Already have (good foundation):</strong> exposure/brightness/contrast/highlights/shadows,
+saturation/vibrance, temperature/tint, curves (master + RGB), <strong>local masked edits with
+feather + edge-aware borders</strong>, heal (classical + LaMa), remove-person (SAM),
+reshape/liquify, seamless paste, crop/rotate, 30 looks, full-res non-destructive, layers,
+<code>.iedit</code> projects. Dodge &amp; burn is <em>nearly</em> free already (masked local exposure).</p>
+<p><strong>The gaps that most affect a professional result</strong>, high → lower leverage:</p>
+<ol>
+<li><strong>HSL + colour grading</strong> (per-hue sat/lum; shadow/mid/highlight colour balance / split-tone).
+   Capture One's headline strength; the biggest "pro colour" lever we lack. <em>(OpenCV/NumPy — no model.)</em></li>
+<li><strong>White-balance eyedropper</strong> + Kelvin temp; <strong>auto-WB we have, but not click-neutral.</strong> <em>(easy)</em></li>
+<li><strong>Clarity / Texture / Dehaze</strong> (local-contrast midtone punch; dark-channel-prior haze removal). <em>(OpenCV — no model.)</em></li>
+<li><strong>Sharpening</strong> — capture sharpening (unsharp/high-pass) <strong>and output sharpening</strong> sized for
+   screen/print. A pro final step we don't have. <em>(OpenCV — no model.)</em></li>
+<li><strong>Dodge &amp; burn tool</strong> — a dedicated brush (leverages our masked-exposure layers). <em>(reuse.)</em></li>
+<li><strong>Denoise</strong> — classical (<code>cv2.fastNlMeansDenoisingColored</code>) now; <strong>AI denoise</strong> later.
+   High-ISO cleanup is a top pro differentiator (DxO DeepPRIME). <em>(classical easy; ML bigger.)</em></li>
+<li><strong>Frequency separation</strong> — smooth skin tone while keeping texture, for portraits.
+   <em>(low/high-pass split — OpenCV.)</em></li>
+<li><strong>Vignette + film grain</strong> — finishing touches for a graded look. <em>(easy.)</em></li>
+<li><strong>Presets</strong> — save an adjustment recipe (an <code>.iedit</code> minus the pixels) and apply it to any
+   image / a batch. <strong>Consistency is itself professionalism.</strong> <em>(reuses our serializer.)</em></li>
+<li><strong>RAW input</strong> (<code>rawpy</code>/libraw) — the single biggest <em>image-quality</em> gap: real highlight
+    recovery and WB come from RAW, not JPEG. <em>(dependency, no model.)</em></li>
+<li><strong>Lens &amp; perspective correction</strong> — distortion/vignetting/chromatic-aberration and
+    keystone/horizon straighten. <em>(OpenCV <code>undistort</code> / perspective; manual sliders feasible.)</em></li>
+<li><strong>AI super-resolution / upscale</strong> — enlarge for print without going soft; <strong>Real-ESRGAN</strong>
+    via ONNX Runtime is the open path (reuses our lazy-backend pattern from LaMa/SAM). <em>(model.)</em></li>
+</ol>
+<h3 id="recommendation">Recommendation</h3>
+<p>Most of the "professional look" is reachable <strong>with no new dependencies</strong> — items 1–5, 7–9 are
+pure OpenCV/NumPy and slot into the existing layer/mask/curve engine. Items 6, 10–12 (AI denoise,
+RAW, lens profiles, super-resolution) are the heavier, higher-quality tier that follows the same
+optional-backend pattern already proven with LaMa and SAM. Until RAW/denoise/upscale land,
+pairing image-editor with a free RAW processor (<strong>Darktable / RawTherapee</strong>) covers the gap.</p>
+<p>See <code>plan.md</code> <strong>Phase 9</strong> for the prioritized build.</p>
+<hr />
+<h2 id="sources">Sources</h2>
+<ul>
+<li>IOPaint (LaMa / SD inpainting, mask→fill workflow) — https://github.com/Sanster/IOPaint</li>
+<li>Poisson Image Editing, Pérez, Gangnet &amp; Blake, SIGGRAPH 2003 — https://www.cs.jhu.edu/~misha/Fall07/Papers/Perez03.pdf</li>
+<li>OpenCV Seamless Cloning API — https://docs.opencv.org/4.x/df/da0/group__photo__clone.html</li>
+<li>Seamless Cloning walkthrough (LearnOpenCV) — https://learnopencv.com/seamless-cloning-using-opencv-python-cpp/</li>
+<li>SAM 2 (Ultralytics docs) — https://docs.ultralytics.com/models/sam-2</li>
+<li>Segment Anything 2 analysis (arXiv) — https://arxiv.org/pdf/2503.00042</li>
+<li>rembg (U²-Net background removal) — https://github.com/danielgatis/rembg</li>
+<li>U²-Net image segmentation (LearnOpenCV) — https://learnopencv.com/u2-net-image-segmentation/</li>
+<li>darktable — tone curve — https://docs.darktable.org/usermanual/development/en/module-reference/processing-modules/tone-curve/</li>
+<li>darktable — drawn masks — https://docs.darktable.org/usermanual/development/en/darkroom/masking-and-blending/masks/drawn/</li>
+<li>darktable — mask refinement (edge-aware feathering) — https://docs.darktable.org/usermanual/development/en/darkroom/masking-and-blending/masks/refinement-controls/</li>
+<li>Luminosity masking in darktable (PIXLS.US) — https://pixls.us/articles/luminosity-masking-in-darktable/</li>
+<li>Imagen — how to edit like a professional (2026 workflow) — https://imagen-ai.com/valuable-tips/how-to-edit-photos-like-a-professional-editor/</li>
+<li>Filterpixel — a precise, repeatable pro workflow — https://filterpixel.com/blog/how-to-professionally-edit-photos</li>
+<li>Fstoppers — frequency separation, dodge &amp; burn, colour grading — https://fstoppers.com/education/complete-guide-frequency-separation-dodging-and-burning-and-color-grading-485517</li>
+<li>Best photo editing software 2026 (Lightroom/Capture One/DxO/Darktable) — https://www.findingtheuniverse.com/best-photo-editing-software/</li>
+<li>Topaz Labs — best image upscalers 2026 — https://www.topazlabs.com/best-image-upscalers</li>
+<li>Real-ESRGAN (open-source super-resolution) — https://github.com/xinntao/Real-ESRGAN
+</content>
+</invoke></li>
+</ul></main></body></html>

@@ -5,6 +5,17 @@ See [plan.md](plan.md) for the phase roadmap and [analysis.md](analysis.md) for 
 
 ---
 
+## 2026-09-17 (later) — Styled HTML docs for the site ✅
+
+GitHub Pages served the raw `.md` files unformatted. Added `docs/build_docs.py`
+(uses the `markdown` package) which renders every `docs/*.md` into a standalone,
+themed `*.html` (violet site theme, styled tables/code, a top doc-nav) and rewrites
+intra-doc `.md` links to `.html`. The landing page now links to the `.html` docs;
+the `.md` files stay the source (GitHub renders them natively). Regenerate with
+`.venv/bin/python docs/build_docs.py` after editing any `.md`.
+
+---
+
 ## 2026-09-17 (later) — Docs: pro guide + user guide refresh ✅
 
 - New **`docs/pro-guide.md`** — a step-by-step "professional look" recipe (7 steps),
