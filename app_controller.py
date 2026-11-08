@@ -16,7 +16,7 @@ import numpy as np
 
 import img_io
 from config import Config
-from core import blend, ops
+from core import blend, commands, ops
 from core.document import Document
 from core.layers import Layer
 from core.mask import BrushStroke, Mask, RasterSource
@@ -220,23 +220,11 @@ class AppController:
 
     # --- geometry: rotate + crop -------------------------------------------
 
-    @staticmethod
-    def _rotate_rect_cw(rect):
-        """Map a normalised crop rect through a 90° clockwise image rotation."""
-        x, y, w, h = rect
-        return (1.0 - y - h, x, h, w)
-
     def rotate(self, cw: bool = True):
         if self.doc is None:
             return
-        self.doc.push_history()
-        step = 90 if cw else 270
-        self.doc.rotation = (self.doc.rotation + step) % 360
-        if self.doc.crop_rect is not None:
-            r = self.doc.crop_rect
-            for _ in range(step // 90):
-                r = self._rotate_rect_cw(r)
-            self.doc.crop_rect = r
+        commands.run_command(self.doc, "image.rotate",
+                             {"direction": "cw" if cw else "ccw"})
 
     def apply_crop(self, drawn):
         """Compose a crop drawn on the CURRENT view onto any existing crop."""
@@ -250,9 +238,8 @@ class AppController:
         self.doc.crop_rect = (ex + dx * ew, ey + dy * eh, dw * ew, dh * eh)
 
     def clear_crop(self):
-        if self.doc and self.doc.crop_rect is not None:
-            self.doc.push_history()
-            self.doc.crop_rect = None
+        if self.doc:
+            commands.run_command(self.doc, "image.clearCrop", {})
 
     # --- layer management --------------------------------------------------
 
@@ -260,18 +247,20 @@ class AppController:
         return self.doc.layers if self.doc else []
 
     def set_layer_visible(self, i: int, on: bool):
-        if self.doc and 0 <= i < len(self.doc.layers):
-            self.doc.push_history()
-            self.doc.layers[i].visible = on
+        if self.doc:
+            commands.run_command(self.doc, "layer.setVisible", {"index": i, "visible": on})
 
     def set_layer_opacity(self, i: int, opacity: float):
+        # NOT routed through the registry: this is a live slider drag, so it must
+        # stay out of the undo history (one entry per tick would be useless). The
+        # layer.setOpacity command exists for scripted/agent use, where each call
+        # is a deliberate step worth journaling.
         if self.doc and 0 <= i < len(self.doc.layers):
             self.doc.layers[i].opacity = max(0.0, min(1.0, opacity))
 
     def remove_layer_at(self, i: int):
-        if self.doc and 0 <= i < len(self.doc.layers):
-            self.doc.push_history()
-            del self.doc.layers[i]
+        if self.doc:
+            commands.run_command(self.doc, "layer.remove", {"index": i})
 
     # --- local (selection) adjustments -------------------------------------
 
@@ -465,10 +454,14 @@ class AppController:
         return True
 
     def undo(self) -> bool:
-        return self.doc.undo() if self.doc else False
+        if not self.doc:
+            return False
+        return bool(commands.run_command(self.doc, "edit.undo", {}).get("result", {}).get("undone"))
 
     def redo(self) -> bool:
-        return self.doc.redo() if self.doc else False
+        if not self.doc:
+            return False
+        return bool(commands.run_command(self.doc, "edit.redo", {}).get("result", {}).get("redone"))
 
     # --- project (.iedit) --------------------------------------------------
 

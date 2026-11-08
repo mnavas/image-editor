@@ -8,6 +8,14 @@ send2trash>=1.8
 # Dev
 pytest>=8.0
 
+# MCP server (optional) — drive the editor's command registry from Claude.
+#   pip install "mcp<2"          # v1 FastMCP API (v2 renamed it to MCPServer)
+#   claude mcp add image-editor -- python /path/to/image-editor/mcp_server.py \
+#       --read-root /work/project --write-root /work/project/out
+# The server (mcp_server.py) and the registry (core/commands.py) are Qt-free, so the
+# agent runs the same engine as the UI. See ~/Code/photocraft/docs/mcp.md for the model.
+mcp<2
+
 # Phase 7 — LaMa "erase a person" (optional). simple-lama-inpainting's own pins are
 # hostile (Pillow<10 from source, numpy<2, and it drags the full CUDA toolkit), so
 # install it deliberately, CPU-only, in TWO steps — do NOT `pip install` it plainly:

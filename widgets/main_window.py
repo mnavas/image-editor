@@ -9,17 +9,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import os
+
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea,
-    QSlider, QTabWidget, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog,
+    QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QMainWindow, QMessageBox, QPushButton, QScrollArea, QSlider, QSpinBox,
+    QTabWidget, QVBoxLayout, QWidget,
 )
 
 from app_controller import GLOBAL_ADJUST_KEYS, AppController
 from config import Config
+from core import commands
 from core.film_luts import FILM_SIMS
+from widgets.agent_toast import AgentToast
 from widgets.canvas import Canvas
+from widgets.command_palette import CommandPalette
 from widgets.curve_editor import CurveEditor
 
 # The native OS file dialog matches globs case-sensitively, so plain "*.jpg" hides
@@ -73,7 +80,58 @@ class MainWindow(QMainWindow):
 
         self._worker = None
         self._build_toolbar()
+        self._build_menubar()
+        self._toast = AgentToast(self)
+        self._install_command_palette()
+        self._control = None
+        self._maybe_start_control_server()
         self._set_enabled(False)
+
+    # --- command palette (Ctrl+K) -----------------------------------------
+
+    def _install_command_palette(self):
+        act = QAction("Command Palette…", self)
+        act.setShortcut(QKeySequence("Ctrl+K"))
+        act.triggered.connect(self._open_command_palette)
+        self.addAction(act)                          # window-wide shortcut
+
+    def _open_command_palette(self):
+        doc = self.ctl.doc
+        if doc is None:
+            return
+        entries = commands.command_list(doc)
+        CommandPalette(
+            self, entries,
+            on_choose=lambda cid: self._run_menu_command(commands.REGISTRY[cid]),
+        ).exec()
+
+    def note_agent_action(self, text: str):
+        """Flash a toast when the agent bridge changes the live document."""
+        self._toast.show_message(text)
+
+    # --- agent bridge (opt-in) --------------------------------------------
+
+    def _maybe_start_control_server(self):
+        """Start the loopback control server if IMAGE_EDITOR_CONTROL is set.
+
+        Value "1" picks a free port; a number binds that port. The port+token are
+        written to ~/.cache/image-editor/control.json for `mcp_server.py --bridge`.
+        """
+        val = os.environ.get("IMAGE_EDITOR_CONTROL")
+        if not val:
+            return
+        try:
+            from control_server import ControlServer
+            port = int(val) if val.isdigit() else 0
+            self._control = ControlServer(self, port=port)
+            print(f"[image-editor] control server on 127.0.0.1:{self._control.port}")
+        except Exception as e:                           # never block app launch
+            print(f"[image-editor] control server failed to start: {e}")
+
+    def closeEvent(self, event):
+        if self._control is not None:
+            self._control.close()
+        super().closeEvent(event)
 
     # --- UI construction ---------------------------------------------------
 
@@ -97,6 +155,90 @@ class MainWindow(QMainWindow):
             tb.addWidget(b)
             if label not in ("Open", "Open Project"):
                 self._tb_buttons.append(b)
+
+    def _build_menubar(self):
+        """Generate the menu bar straight from the command registry metadata.
+
+        Each command with a `menu` placement becomes an action; its label,
+        shortcut, enabled-state and parameters all come from its CommandSpec, so
+        the UI and the agent stay in lockstep — add a command once, get both.
+        """
+        bar = self.menuBar()
+        self._menu_actions = []                          # [(QAction, CommandSpec)]
+        order = ["Edit", "Image", "Layer"]
+        groups: dict[str, list] = {}
+        for spec in commands.REGISTRY.values():
+            if not spec.menu:                            # queries etc. aren't menu items
+                continue
+            groups.setdefault(spec.menu[0], []).append(spec)
+        for name in order + [g for g in groups if g not in order]:
+            specs = groups.get(name)
+            if not specs:
+                continue
+            menu = bar.addMenu(name)
+            menu.setToolTipsVisible(True)                # show disabled-reason tips
+            for spec in specs:
+                act = QAction(spec.label, self)
+                if spec.shortcut:
+                    act.setShortcut(QKeySequence(spec.shortcut))
+                act.triggered.connect(lambda _checked, s=spec: self._run_menu_command(s))
+                menu.addAction(act)
+                self._menu_actions.append((act, spec))
+            menu.aboutToShow.connect(self._sync_menu_enabled)
+        self._sync_menu_enabled()
+
+    def _sync_menu_enabled(self):
+        doc = self.ctl.doc
+        for act, spec in self._menu_actions:
+            ok = doc is not None and spec.enabled(doc)
+            act.setEnabled(ok)
+            # when greyed out, say why right on the item ("nothing to undo", …)
+            if ok:
+                act.setToolTip("")
+            else:
+                act.setToolTip("no document" if doc is None else spec.disabled_reason(doc))
+
+    def _run_menu_command(self, spec):
+        doc = self.ctl.doc
+        if doc is None:
+            return
+        if not spec.params:
+            self._commit_command(spec, {})
+            return
+
+        # Param command: preview live on the canvas as the values change, then
+        # commit on OK or revert on Cancel. Each trial journals one history entry
+        # we undo before the next trial, so the preview never piles up undo steps
+        # and Cancel leaves the document exactly as it was.
+        trial = {"on": False}
+
+        def revert_trial():
+            if trial["on"]:
+                doc.undo()
+                trial["on"] = False
+
+        def preview(params):
+            if not spec.journal:                         # can't safely trial a non-journaling cmd
+                return
+            revert_trial()
+            res = commands.run_command(doc, spec.id, params)
+            if res["ok"]:
+                trial["on"] = True
+            self._render_preview()                       # repaint without resetting zoom
+
+        params = _params_dialog(self, spec, on_change=preview)
+        revert_trial()                                   # drop the last live trial
+        if params is None:                               # cancelled — back to before
+            self.refresh_from_engine()
+            return
+        self._commit_command(spec, params)
+
+    def _commit_command(self, spec, params):
+        res = commands.run_command(self.ctl.doc, spec.id, params)
+        if res["ok"]:
+            self.refresh_from_engine()
+        else:
+            self.status.setText(f"{spec.label}: {res['error']}")
 
     def _build_rail(self) -> QWidget:
         tabs = QTabWidget()
@@ -410,15 +552,25 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Open image", start, _OPEN_FILTER)
         if not path:
             return
-        if not self.ctl.open(path):
+        if not self.open_path(path):
             QMessageBox.warning(self, "image-editor", "Could not open that image.")
-            return
+
+    def open_path(self, path: str) -> bool:
+        """Open a file by path (shared by the Open dialog and the control bridge)."""
+        if not path or not self.ctl.open(path):
+            return False
         self._reset_controls()
         self._set_enabled(True)
         self.canvas.set_array(self.ctl.render(), reset=True)
         self._refresh_layers()
         h, w = self.ctl.doc.base.shape[:2]
         self.setWindowTitle(f"image-editor — {Path(path).name} ({w}×{h})")
+        return True
+
+    def refresh_from_engine(self):
+        """Repaint after the engine mutated the document (menu action or bridge)."""
+        self._refresh_layers()
+        self.canvas.set_array(self.ctl.render(), reset=True)
 
     def _save(self):
         if self.ctl.doc is None:
@@ -877,6 +1029,77 @@ class MainWindow(QMainWindow):
         for w in (self.lbl_feather, self.feather_slider, self.chk_edge,
                   self.btn_apply_sel, self.btn_apply_curve):
             w.setEnabled(sel)
+
+
+def _params_dialog(parent, spec, on_change=None) -> dict | None:
+    """Build a dialog from a command's `params` schema; return the values or None.
+
+    The widget for each field is chosen from its declared type, so the same
+    agent-readable schema that documents the command for Claude also lays out the
+    human form. No per-command dialog code.
+
+    If `on_change` is given, it is called with the current values whenever any
+    field changes (and once up front), so the host can preview the command live
+    on the canvas before the user commits.
+    """
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(spec.label)
+    form = QFormLayout(dlg)
+    getters = {}
+    signals = []                                         # (widget-signal) to wire for preview
+    for name, meta in spec.params.items():
+        meta = meta or {}
+        kind = meta.get("type", "float")
+        if kind == "enum":
+            w = QComboBox()
+            w.addItems([str(v) for v in meta.get("values", [])])
+            if meta.get("default") is not None:
+                w.setCurrentText(str(meta["default"]))
+            getters[name] = w.currentText
+            signals.append(w.currentTextChanged)
+        elif kind == "bool":
+            w = QCheckBox()
+            w.setChecked(bool(meta.get("default", False)))
+            getters[name] = w.isChecked
+            signals.append(w.toggled)
+        elif kind == "int":
+            w = QSpinBox()
+            w.setRange(-100000, 100000)
+            w.setValue(int(meta.get("default", 0)))
+            getters[name] = w.value
+            signals.append(w.valueChanged)
+        elif kind == "float":
+            w = QDoubleSpinBox()
+            lo, hi = (meta.get("range") or [-1000, 1000])[:2]
+            w.setRange(float(lo), float(hi))
+            w.setDecimals(2)
+            w.setValue(float(meta.get("default", 0.0)))
+            getters[name] = w.value
+            signals.append(w.valueChanged)
+        else:
+            w = QLineEdit(str(meta.get("default", "")))
+            getters[name] = w.text
+            signals.append(w.textChanged)
+        doc = meta.get("doc", "")
+        form.addRow(f"{name}:", w)
+        if doc:
+            w.setToolTip(doc)
+
+    if on_change is not None:
+        def _emit(*_):
+            on_change({name: get() for name, get in getters.items()})
+        for sig in signals:
+            sig.connect(_emit)
+        _emit()                                          # preview the initial values
+
+    buttons = QDialogButtonBox(
+        QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    buttons.accepted.connect(dlg.accept)
+    buttons.rejected.connect(dlg.reject)
+    form.addRow(buttons)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return {name: get() for name, get in getters.items()}
 
 
 def _process_events():
