@@ -84,3 +84,41 @@ def test_unknown_command_is_an_error_not_a_crash():
     doc = _doc()
     res = commands.run_command(doc, "does.notExist", {})
     assert not res["ok"] and "unknown command" in res["error"]
+
+
+def test_auto_corrections_add_undoable_layers():
+    """One-click autos (mined from PhotoCraft) each commit a non-destructive layer.
+
+    These ops (auto_tone/levels/wb/normalize) were previously unreachable from the
+    registry — adjust.apply only takes scalar ADJUST_KEYS.
+    """
+    import numpy as np
+    doc = _doc()
+    before = doc.render(1.0).copy()
+    for cid, name in (("image.autoTone", "Auto Tone"),
+                      ("image.autoLevels", "Auto Levels"),
+                      ("image.autoWhiteBalance", "Auto White Balance"),
+                      ("image.normalize", "Normalize (CLAHE)")):
+        n = len(doc.layers)
+        res = commands.run_command(doc, cid, {})
+        assert res["ok"], res
+        assert len(doc.layers) == n + 1
+        assert doc.layers[-1].kind == "adjust_set"
+        assert doc.layers[-1].name == name
+    assert not np.array_equal(before, doc.render(1.0))   # the stack actually changed the image
+    # each was a journalled step — undo peels them back off
+    while doc.layers:
+        assert doc.undo()
+    assert len(doc.layers) == 0
+
+
+def test_auto_corrections_are_discoverable_with_shortcuts():
+    doc = _doc()
+    by_id = {c["id"]: c for c in commands.command_list(doc)}
+    assert by_id["image.autoTone"]["shortcut"] == "Ctrl+Shift+L"
+    assert by_id["image.autoWhiteBalance"]["shortcut"] == "Ctrl+Shift+B"
+    for cid in ("image.autoTone", "image.autoLevels",
+                "image.autoWhiteBalance", "image.normalize"):
+        assert by_id[cid]["enabled"] is True         # always available with a document
+        assert by_id[cid]["menu"][0] == "Image"
+        assert by_id[cid]["params"] == {}            # one-click, no dialog

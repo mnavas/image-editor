@@ -310,6 +310,31 @@ register(CommandSpec(
     params={k: {"type": "float", "doc": "amount; 0 = skip"} for k in ADJUST_KEYS}, ))
 
 
+# -- one-click auto corrections --------------------------------------------
+# Analytic ops (they read the pixels; no scalar), so they can't be slider values
+# — they're committed as their own maskless adjust_set layer, non-destructive and
+# undoable like every other edit. This also exposes ops that were previously
+# unreachable from the registry (and therefore from the palette, MCP and bridge).
+
+def _run_auto(doc: Document, op: str, label: str) -> dict:
+    layer = doc.add_layer(Layer(kind="adjust_set", name=label,
+                                params={"recipe": [(op, {})]}))
+    return {"added": True, "name": layer.name, "op": op,
+            "index": len(doc.layers) - 1}
+
+
+for _aid, _alabel, _aop, _ashort in (
+    ("image.autoTone",         "Auto Tone",          "auto_tone",   "Ctrl+Shift+L"),
+    ("image.autoLevels",       "Auto Levels",        "auto_levels", "Ctrl+Alt+Shift+L"),
+    ("image.autoWhiteBalance", "Auto White Balance", "auto_wb",     "Ctrl+Shift+B"),
+    ("image.normalize",        "Normalize (CLAHE)",  "normalize",   ""),
+):
+    register(CommandSpec(
+        id=_aid, label=_alabel, menu=("Image", "Auto"), shortcut=_ashort, journal=True,
+        run=(lambda d, _p, _op=_aop, _lbl=_alabel: _run_auto(d, _op, _lbl)),
+        params={}))
+
+
 # -- layer management -------------------------------------------------------
 
 def _run_layer_visible(doc: Document, p: dict) -> dict:

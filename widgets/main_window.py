@@ -313,6 +313,22 @@ class MainWindow(QMainWindow):
         mode.addWidget(self.btn_mode_sel)
         v.addLayout(mode)
 
+        # One-click auto corrections — a non-destructive adjustment layer each,
+        # straight from the command registry (same path as the menu + palette).
+        v.addWidget(QLabel("One-click"))
+        auto_row = QHBoxLayout()
+        for cid, text, tip in (
+            ("image.autoTone",         "Tone",   "Auto Tone — fix exposure, keep colour (Ctrl+Shift+L)"),
+            ("image.autoLevels",       "Levels", "Auto Levels — per-channel contrast + colour"),
+            ("image.autoWhiteBalance", "WB",     "Auto White Balance — remove a colour cast (Ctrl+Shift+B)"),
+            ("image.normalize",        "CLAHE",  "Normalize — local contrast / CLAHE"),
+        ):
+            b = QPushButton(text)
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _checked, i=cid: self._run_menu_command(commands.REGISTRY[i]))
+            auto_row.addWidget(b)
+        v.addLayout(auto_row)
+
         self.sliders = {}
         for key in GLOBAL_ADJUST_KEYS:
             v.addWidget(QLabel(key.capitalize()))
